@@ -178,44 +178,15 @@ function renderEditor() {
 
 // ============ Markdown 渲染（极简版） ============
 function renderMarkdown(md) {
-    let s = escapeHtml(md);
-    s = s.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, __, code) => `<pre><code>${code.replace(/\n$/, '')}</code></pre>`);
-    s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-    s = s.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
-    s = s.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
-    s = s.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
-    s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-    s = s.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-    s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-    s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-    s = s.replace(/(?<![*\w])\*([^*\n]+)\*(?!\w)/g, '<em>$1</em>');
-    // 先处理 NoteForge 内部图片引用 nf:asset/<id>
-    s = s.replace(/!\[([^\]]*)\]\(nf:asset\/([\w-]+)\)/g, (m, alt, id) => {
+    // 先把内部的 nf:asset/<id> 引用换成 blob URL
+    const pre = md.replace(/!\[([^\]]*)\]\(nf:asset\/([\w-]+)\)/g, (m, alt, id) => {
         const url = assetMap.get(id);
-        if (url) return `<img alt="${escapeHtml(alt)}" src="${url}">`;
-        return `<span style="color:#c33">[图片丢失:${id}]</span>`;
+        return url ? `![${alt}](${url})` : `![图片丢失:${id}]()`;
     });
-    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2">');
-    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-    s = s.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-    s = s.replace(/^---+$/gm, '<hr>');
-
-    // 列表
-    s = s.replace(/^- (.+)$/gm, '<li>$1</li>');
-    s = s.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-    s = s.replace(/(?:<li>[\s\S]*?<\/li>\n?)+/g, (m) => `<ul>${m}</ul>`);
-
-    // 段落
-    const out = [];
-    for (const line of s.split('\n')) {
-        if (!line.trim()) { out.push(''); continue; }
-        if (/^<(h\d|ul|ol|li|pre|blockquote|hr|p|img|div)/i.test(line) || /^<\/(h\d|ul|ol|blockquote|pre)/i.test(line)) {
-            out.push(line);
-        } else {
-            out.push(`<p>${line}</p>`);
-        }
-    }
-    return out.join('\n');
+    return marked.parse(pre, {
+        gfm: true,      // 表格、任务列表、删除线
+        breaks: true,   // 单个换行当换行处理（便签场景更自然）
+    });
 }
 
 function updatePreview() {

@@ -524,6 +524,45 @@ select {
     margin: 0.75em 0;
 }
 
+.markdown-body table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+    font-size: 0.92em;
+}
+
+.markdown-body th,
+.markdown-body td {
+    border: 1px solid var(--border);
+    padding: 0.4em 0.7em;
+    text-align: left;
+}
+
+.markdown-body th {
+    background: var(--bg-soft);
+    font-weight: 600;
+}
+
+.markdown-body input[type="checkbox"] {
+    margin-right: 0.4em;
+    vertical-align: middle;
+}
+
+.markdown-body ul:has(input[type="checkbox"]) {
+    list-style: none;
+    padding-left: 0.3em;
+}
+
+.markdown-body del {
+    color: var(--fg-soft);
+}
+
+.markdown-body h1,
+.markdown-body h2 {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.3em;
+}
+
 @media (max-width: 768px) {
     .sidebar {
         position: fixed;

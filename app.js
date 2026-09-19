@@ -21,12 +21,13 @@ function escapeHtml(s) {
 let db;
 function openDB() {
     return new Promise((res, rej) => {
-        const r = indexedDB.open('noteforge', 1);
+        const r = indexedDB.open('noteforge', 2);
         r.onupgradeneeded = (e) => {
             const d = e.target.result;
             if (!d.objectStoreNames.contains('subjects')) d.createObjectStore('subjects', { keyPath: 'id' });
             if (!d.objectStoreNames.contains('notes')) d.createObjectStore('notes', { keyPath: 'id' });
             if (!d.objectStoreNames.contains('settings')) d.createObjectStore('settings', { keyPath: 'key' });
+            if (!d.objectStoreNames.contains('assets')) d.createObjectStore('assets', { keyPath: 'id' });
         };
         r.onsuccess = () => res(r.result);
         r.onerror = () => rej(r.error);
@@ -64,6 +65,7 @@ async function getSetting(k, d) { const r = await idbGet('settings', k); return 
 async function setSetting(k, v) { await idbPut('settings', { key: k, value: v }); }
 
 // ============ 状态 ============
+const assetMap = new Map(); // assetId -> blob URL，用于渲染时同步查找
 const state = {
     subjects: [],
     notes: [],
@@ -75,6 +77,7 @@ const state = {
 // ============ 初始化 ============
 async function init() {
     db = await openDB();
+    await loadAllAssets();
     state.subjects = (await idbAll('subjects')).sort((a, b) => a.order - b.order);
     state.notes = await idbAll('notes');
 
@@ -93,6 +96,13 @@ async function init() {
     renderEditor();
     bindEvents();
     registerSW();
+}
+
+async function loadAllAssets() {
+    const assets = await idbAll('assets');
+    for (const a of assets) {
+        if (!assetMap.has(a.id)) assetMap.set(a.id, URL.createObjectURL(a.blob));
+    }
 }
 
 // ============ 渲染 ============
@@ -179,6 +189,12 @@ function renderMarkdown(md) {
     s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
     s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/(?<![*\w])\*([^*\n]+)\*(?!\w)/g, '<em>$1</em>');
+    // 先处理 NoteForge 内部图片引用 nf:asset/<id>
+    s = s.replace(/!\[([^\]]*)\]\(nf:asset\/([\w-]+)\)/g, (m, alt, id) => {
+        const url = assetMap.get(id);
+        if (url) return `<img alt="${escapeHtml(alt)}" src="${url}">`;
+        return `<span style="color:#c33">[图片丢失:${id}]</span>`;
+    });
     s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2">');
     s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     s = s.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
@@ -208,6 +224,9 @@ function updatePreview() {
 
 // ============ 事件 ============
 function bindEvents() {
+
+    $('#insertImageBtn').addEventListener('click', insertImage);
+
     $('#menuBtn').addEventListener('click', () => {
         if (window.innerWidth <= 768) {
             $('#sidebar').classList.toggle('open');
@@ -245,6 +264,42 @@ function bindEvents() {
 
     $('#addSubjectBtn').addEventListener('click', addSubject);
     $('#addNoteBtn').addEventListener('click', addNote);
+
+    async function insertImage() {
+        if (!state.currentNoteId) { alert('请先进入一篇笔记'); return; }
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.multiple = true;
+        input.onchange = async () => {
+            const ta = $('#noteContent');
+            for (const file of input.files) {
+                const id = uuid();
+                const ext = (file.name.match(/\.([^.]+)$/) || [, 'png'])[1].toLowerCase();
+                const asset = {
+                    id,
+                    name: file.name,
+                    type: file.type,
+                    ext,
+                    blob: file,
+                    createdAt: now(),
+                };
+                await idbPut('assets', asset);
+                if (assetMap.has(id)) URL.revokeObjectURL(assetMap.get(id));
+                assetMap.set(id, URL.createObjectURL(file));
+
+                const md = `![${file.name}](nf:asset/${id})`;
+                const start = ta.selectionStart;
+                const end = ta.selectionEnd;
+                ta.value = ta.value.slice(0, start) + md + ta.value.slice(end);
+                ta.selectionStart = ta.selectionEnd = start + md.length;
+            }
+            ta.dispatchEvent(new Event('input'));
+            ta.focus();
+        };
+        input.click();
+    }
+
     $('#deleteNoteBtn').addEventListener('click', deleteNote);
     $('#backBtn').addEventListener('click', () => {
         state.currentNoteId = null;
@@ -520,39 +575,155 @@ async function exportData() {
     const settingsArr = await idbAll('settings');
     const settings = {};
     for (const s of settingsArr) settings[s.key] = s.value;
-    const data = {
+
+    const safeName = (s) =>
+        String(s || '').replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+$/, '_').trim() || 'untitled';
+
+    const enc = new TextEncoder();
+    const zipFiles = {};
+    const usedPaths = new Set();
+    const meta = {
         app: 'noteforge',
-        version: 1,
+        version: 2,
         exportedAt: now(),
-        subjects: state.subjects,
-        notes: state.notes,
         settings,
+        subjects: state.subjects,
+        assets: [],
+        notes: [],
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+
+    // 打包 assets
+    const assets = await idbAll('assets');
+    for (const a of assets) {
+        const path = `assets/${a.id}.${a.ext}`;
+        const bytes = new Uint8Array(await a.blob.arrayBuffer());
+        zipFiles[path] = [bytes, { level: 0 }];
+        meta.assets.push({ id: a.id, name: a.name, type: a.type, ext: a.ext, file: path });
+    }
+
+    // 打包笔记
+    for (const n of state.notes) {
+        const subj = state.subjects.find((s) => s.id === n.subjectId);
+        const subjDir = safeName(subj ? subj.name : '_orphan');
+        const baseName = safeName(n.title || 'untitled');
+        let path = `notes/${subjDir}/${baseName}.md`;
+        let i = 2;
+        while (usedPaths.has(path)) path = `notes/${subjDir}/${baseName}-${i++}.md`;
+        usedPaths.add(path);
+
+        // 把 nf:asset/<id> 换成相对路径 ../../assets/<id>.<ext>
+        let content = n.content || '';
+        content = content.replace(/nf:asset\/([\w-]+)/g, (m, id) => {
+            const a = meta.assets.find((x) => x.id === id);
+            return a ? `../../${a.file}` : m;
+        });
+
+        zipFiles[path] = [enc.encode(content), { level: 6 }];
+        meta.notes.push({
+            id: n.id,
+            subjectId: n.subjectId,
+            title: n.title,
+            file: path,
+            createdAt: n.createdAt,
+            updatedAt: n.updatedAt,
+        });
+    }
+
+    // 元数据
+    zipFiles['noteforge.json'] = [enc.encode(JSON.stringify(meta, null, 2)), { level: 6 }];
+    zipFiles['README.txt'] = [enc.encode(readmeText(meta)), { level: 6 }];
+
+    const zipped = fflate.zipSync(zipFiles);
+    const blob = new Blob([zipped], { type: 'application/zip' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `noteforge-backup-${todayStr()}.json`;
+    a.download = `noteforge-backup-${todayStr()}.zip`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
 }
 
+function readmeText(meta) {
+    return `NoteForge 导出文件
+====================
+
+导出时间：${new Date(meta.exportedAt).toLocaleString()}
+
+目录结构：
+  noteforge.json        配置与元数据
+  notes/<科目>/<标题>.md  纯 Markdown 笔记
+  assets/<id>.<ext>     图片等附件
+  README.txt            本文件
+
+notes/ 下的 .md 是纯 Markdown，可用任何编辑器打开。
+图片以相对路径 ../../assets/ 引用。
+
+导入时请使用未解压的 zip 文件（可被 7-Zip / WinRAR 重打包，
+但请勿修改内部目录结构）。
+`;
+}
+
 function importData() {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.json,application/json';
+    input.accept = '.zip,application/zip';
     input.onchange = async () => {
         const file = input.files[0];
         if (!file) return;
         try {
-            const data = JSON.parse(await file.text());
-            if (data.app !== 'noteforge' || !Array.isArray(data.subjects) || !Array.isArray(data.notes)) {
-                alert('文件格式不正确，需要 NoteForge 导出的 JSON');
-                return;
+            const buf = new Uint8Array(await file.arrayBuffer());
+            const zipFiles = fflate.unzipSync(buf);
+            const dec = new TextDecoder();
+
+            const metaRaw = zipFiles['noteforge.json'];
+            if (!metaRaw) throw new Error('缺少 noteforge.json，不是 NoteForge 导出文件');
+            const meta = JSON.parse(dec.decode(metaRaw));
+            if (meta.app !== 'noteforge' || !Array.isArray(meta.subjects) || !Array.isArray(meta.notes)) {
+                throw new Error('noteforge.json 格式不正确');
             }
-            await handleImport(data);
+
+            // 1. 恢复 assets
+            const assetsMeta = Array.isArray(meta.assets) ? meta.assets : [];
+            const assetPathMap = new Map(); // assetId -> zip 路径
+            for (const a of assetsMeta) assetPathMap.set(a.id, a.file);
+
+            for (const a of assetsMeta) {
+                const bytes = zipFiles[a.file];
+                if (!bytes) continue;
+                const blob = new Blob([bytes], { type: a.type || 'application/octet-stream' });
+                await idbPut('assets', {
+                    id: a.id, name: a.name, type: a.type, ext: a.ext, blob, createdAt: now(),
+                });
+                if (assetMap.has(a.id)) URL.revokeObjectURL(assetMap.get(a.id));
+                assetMap.set(a.id, URL.createObjectURL(blob));
+            }
+
+            // 2. 恢复笔记
+            const notes = [];
+            let missing = 0;
+            for (const n of meta.notes) {
+                const raw = zipFiles[n.file];
+                if (!raw) { missing++; continue; }
+                let content = dec.decode(raw);
+                // 把 ../../assets/<id>.<ext> 换回 nf:asset/<id>
+                content = content.replace(/\.\.\/\.\.\/assets\/([\w-]+)\.\w+/g, (m, id) =>
+                    assetPathMap.has(id) ? `nf:asset/${id}` : m
+                );
+                notes.push({ ...n, content });
+            }
+            if (missing > 0) {
+                const go = confirm(`有 ${missing} 篇笔记在 zip 中找不到对应文件，继续导入其余笔记？`);
+                if (!go) return;
+            }
+
+            // 3. 走冲突处理
+            await handleImport({
+                subjects: meta.subjects,
+                notes,
+                settings: meta.settings || {},
+            });
         } catch (err) {
             alert('导入失败：' + err.message);
         }

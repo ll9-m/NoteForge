@@ -1,8 +1,10 @@
 ---
-title: Markdown 基础语法
-date: 2026.09.19
-subject: Tools
-tags: [基础，语法，写作]
+标题: Markdown 基础语法
+日期: 2026.09.19
+科目: Tools
+标签: 基础，语法，写作
+状态: 草稿
+练习: 真
 ---
 
 # 一句话总结

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <meta name="theme-color" content="#3451b2">
+    <title>NoteForge</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon.svg">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <header class="topbar">
+        <button class="icon-btn" id="menuBtn" aria-label="菜单">☰</button>
+        <div class="brand">NoteForge</div>
+        <div class="topbar-actions">
+            <button class="text-btn" id="editToggleBtn">编辑</button>
+            <button class="icon-btn" id="moreBtn" aria-label="更多">⋮</button>
+        </div>
+    </header>
+
+    <div class="layout">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-head">
+                <span class="sidebar-title">科目</span>
+                <button class="icon-btn" id="addSubjectBtn" aria-label="新建科目">＋</button>
+            </div>
+            <ul class="subject-list" id="subjectList"></ul>
+        </aside>
+
+        <main class="main">
+            <section class="view note-list-view" id="noteListView">
+                <div class="view-head">
+                    <h2 id="currentSubjectName">未选择科目</h2>
+                    <button class="icon-btn" id="addNoteBtn" aria-label="新建笔记">＋</button>
+                </div>
+                <ul class="note-list" id="noteList"></ul>
+                <div class="empty" id="noteListEmpty"></div>
+            </section>
+
+            <section class="view editor-view hidden" id="editorView">
+                <div class="view-head">
+                    <button class="icon-btn" id="backBtn" aria-label="返回">←</button>
+                    <input class="note-title-input" id="noteTitle" type="text" placeholder="标题">
+                    <button class="icon-btn" id="deleteNoteBtn" aria-label="删除笔记">🗑</button>
+                </div>
+                <div class="editor-body mode-preview" id="editorBody">
+                    <textarea class="note-content" id="noteContent" placeholder="开始写 Markdown..."
+                        spellcheck="false"></textarea>
+                    <div class="preview markdown-body" id="previewPane"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div class="overlay hidden" id="overlay"></div>
+
+    <div class="more-menu hidden" id="moreMenu">
+        <button data-action="theme">外观</button>
+        <button data-action="fontSize">字体大小</button>
+        <button data-action="defaultSubject">默认科目</button>
+        <button data-action="template">笔记模板</button>
+        <button data-action="renameSubject">重命名当前科目</button>
+        <button data-action="export">导出数据</button>
+        <button data-action="import">导入数据</button>
+    </div>
+
+    <div class="modal-mask hidden" id="modalMask">
+        <div class="modal">
+            <div class="modal-head">
+                <span id="modalTitle">提示</span>
+                <button class="icon-btn" id="modalClose">×</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-foot">
+                <button class="btn" id="modalCancel">取消</button>
+                <button class="btn primary" id="modalOk">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

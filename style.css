@@ -581,3 +581,69 @@ select {
         transform: translateX(0);
     }
 }
+
+/* ===== 科目栏按钮组 ===== */
+.sidebar-head-actions {
+    display: flex;
+    gap: 0.15rem;
+}
+
+/* ===== 笔记项布局（支持选择模式） ===== */
+.note-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.note-item.selected {
+    background: var(--bg-soft);
+}
+
+.note-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.note-check {
+    width: 1.15rem;
+    height: 1.15rem;
+    margin: 0;
+    flex-shrink: 0;
+    pointer-events: none;
+    accent-color: var(--accent);
+}
+
+/* ===== 选择模式头部 ===== */
+.selection-count {
+    flex: 1;
+    font-size: 0.9rem;
+    color: var(--fg-soft);
+}
+
+/* ===== 底部操作栏 ===== */
+.selection-actions {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+}
+
+.selection-actions .btn {
+    flex: 1;
+}
+
+.selection-actions.hidden {
+    display: none;
+}
+
+/* ===== 危险按钮 ===== */
+.btn.danger {
+    color: #d33;
+    border-color: #d33;
+}
+
+[data-theme="dark"] .btn.danger {
+    color: #ff6b6b;
+    border-color: #ff6b6b;
+}

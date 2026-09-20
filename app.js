@@ -72,6 +72,8 @@ const state = {
     currentSubjectId: null,
     currentNoteId: null,
     editMode: false,
+    selectionMode: false,
+    selectedNoteIds: new Set(),
 };
 
 // ============ 初始化 ============
@@ -80,6 +82,8 @@ async function init() {
     await loadAllAssets();
     state.subjects = (await idbAll('subjects')).sort((a, b) => a.order - b.order);
     state.notes = await idbAll('notes');
+
+    await seedIfNeeded();
 
     applyFontSize(await getSetting('fontSize', 16));
     applyTheme(await getSetting('theme', 'auto'));
@@ -103,6 +107,90 @@ async function loadAllAssets() {
     for (const a of assets) {
         if (!assetMap.has(a.id)) assetMap.set(a.id, URL.createObjectURL(a.blob));
     }
+}
+
+async function seedIfNeeded() {
+    const initialized = await getSetting('initialized', false);
+    if (initialized) return;
+
+    const subjId = uuid();
+    const ts = now();
+    const subject = { id: subjId, name: '必读', order: 0 };
+    const note = {
+        id: uuid(),
+        subjectId: subjId,
+        title: '使用说明与 Markdown 速查',
+        content: `# 欢迎使用 NoteForge
+
+一个**完全离线**的 Markdown 笔记应用。数据保存在你的浏览器里，不需要网络也能写。
+
+## 快速上手
+
+- 左上角 ☰ 打开科目列表
+- 科目栏右上角 ＋ 新建科目，🗑 删除当前科目
+- 笔记列表右上角 ＋ 新建笔记，☑ 进入选择模式
+- 右上角 ⋮ 打开设置（外观、字体、默认科目、模板、导入导出）
+
+## 数据存在哪
+
+笔记保存在浏览器 IndexedDB 里，关闭页面不丢，但**清理浏览器数据会丢失**。所以要定期导出备份。
+
+⋮ → 导出数据，会下载一个 zip 文件，包含全部笔记、科目、图片。传到另一台设备，用 ⋮ → 导入数据 恢复。
+
+## Markdown 速查
+
+### 标题
+
+\`# 一级\`、\`## 二级\`、\`### 三级\`
+
+### 强调
+
+\`**粗体**\`、\`*斜体*\`、\`~~删除线~~\`
+
+### 列表
+
+无序用 \`- \`，有序用 \`1. \`，任务列表用 \`- [ ]\` 和 \`- [x]\`。
+
+### 链接与图片
+
+链接：\`[文字](https://example.com)\`
+
+图片：点编辑页右上角 🖼 按钮插入。图片会存进笔记里，导出时一起打包。
+
+### 代码
+
+行内用反引号，代码块用三个反引号包裹并标语言名：
+
+\`\`\`python
+print("hello")
+\`\`\`
+
+### 表格
+
+用 \`|\` 分列，第二行用 \`---\` 定表头：
+
+\`\`\`
+| 字段 | 含义 |
+| --- | --- |
+| title | 标题 |
+\`\`\`
+
+### 引用
+
+\`> 被引用的话\`
+
+---
+
+这篇笔记可以删，也可以留着当参考。`,
+        createdAt: ts,
+        updatedAt: ts,
+    };
+
+    await idbPut('subjects', subject);
+    await idbPut('notes', note);
+    state.subjects.push(subject);
+    state.notes.push(note);
+    await setSetting('initialized', true);
 }
 
 // ============ 渲染 ============
@@ -134,30 +222,52 @@ function renderNotes() {
     if (!subj) {
         emptyEl.textContent = '还没有科目，点击左侧 + 新建';
         emptyEl.style.display = 'block';
+        updateSelectionUI();
         return;
     }
     const notes = state.notes
         .filter((n) => n.subjectId === subj.id)
         .sort((a, b) => b.updatedAt - a.updatedAt);
+
     if (notes.length === 0) {
         emptyEl.textContent = '还没有笔记，点击右上角 + 新建一篇';
         emptyEl.style.display = 'block';
+        updateSelectionUI();
         return;
     }
     emptyEl.style.display = 'none';
+
     for (const n of notes) {
         const li = document.createElement('li');
         li.className = 'note-item';
         li.dataset.id = n.id;
+        if (state.selectionMode && state.selectedNoteIds.has(n.id)) {
+            li.classList.add('selected');
+        }
+
+        if (state.selectionMode) {
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'note-check';
+            cb.checked = state.selectedNoteIds.has(n.id);
+            li.appendChild(cb);
+        }
+
+        const body = document.createElement('div');
+        body.className = 'note-body';
         const t = document.createElement('div');
         t.className = 'note-item-title';
         t.textContent = n.title || '(无标题)';
         const m = document.createElement('div');
         m.className = 'note-item-meta';
         m.textContent = formatDate(n.updatedAt);
-        li.append(t, m);
+        body.append(t, m);
+        li.appendChild(body);
+
         ul.appendChild(li);
     }
+
+    updateSelectionUI();
 }
 
 function renderEditor() {
@@ -236,6 +346,13 @@ function bindEvents() {
     $('#addSubjectBtn').addEventListener('click', addSubject);
     $('#addNoteBtn').addEventListener('click', addNote);
 
+    $('#deleteSubjectBtn').addEventListener('click', deleteSubject);
+    $('#filterNotesBtn').addEventListener('click', enterSelectionMode);
+    $('#cancelSelectBtn').addEventListener('click', exitSelectionMode);
+    $('#selectAllBtn').addEventListener('click', toggleSelectAll);
+    $('#moveSelectedBtn').addEventListener('click', moveSelected);
+    $('#deleteSelectedBtn').addEventListener('click', deleteSelected);
+
     async function insertImage() {
         if (!state.currentNoteId) { alert('请先进入一篇笔记'); return; }
         const input = document.createElement('input');
@@ -299,7 +416,19 @@ function bindEvents() {
     $('#noteList').addEventListener('click', (e) => {
         const li = e.target.closest('.note-item');
         if (!li) return;
-        state.currentNoteId = li.dataset.id;
+        const noteId = li.dataset.id;
+
+        if (state.selectionMode) {
+            if (state.selectedNoteIds.has(noteId)) {
+                state.selectedNoteIds.delete(noteId);
+            } else {
+                state.selectedNoteIds.add(noteId);
+            }
+            renderNotes();
+            return;
+        }
+
+        state.currentNoteId = noteId;
         state.editMode = false;
         $('#editToggleBtn').textContent = '编辑';
         $('#editorBody').classList.remove('mode-edit');
@@ -845,6 +974,179 @@ function registerSW() {
             navigator.serviceWorker.register('sw.js').catch(() => { });
         });
     }
+}
+
+// ============ 选择模式 ============
+function enterSelectionMode() {
+    if (!state.currentSubjectId) {
+        alert('请先选择一个科目');
+        return;
+    }
+    state.selectionMode = true;
+    state.selectedNoteIds.clear();
+    renderNotes();
+}
+
+function exitSelectionMode() {
+    state.selectionMode = false;
+    state.selectedNoteIds.clear();
+    renderNotes();
+}
+
+function updateSelectionUI() {
+    $('#noteListViewHead').classList.toggle('hidden', state.selectionMode);
+    $('#selectionHead').classList.toggle('hidden', !state.selectionMode);
+    $('#selectionActions').classList.toggle('hidden', !state.selectionMode);
+    $('#selectedCount').textContent = `已选 ${state.selectedNoteIds.size} 项`;
+}
+
+function toggleSelectAll() {
+    const subj = state.subjects.find((s) => s.id === state.currentSubjectId);
+    if (!subj) return;
+    const notes = state.notes.filter((n) => n.subjectId === subj.id);
+    const allSelected = notes.length > 0 && notes.every((n) => state.selectedNoteIds.has(n.id));
+    if (allSelected) {
+        state.selectedNoteIds.clear();
+    } else {
+        for (const n of notes) state.selectedNoteIds.add(n.id);
+    }
+    renderNotes();
+}
+
+// ============ 移动 / 删除选中笔记 ============
+async function moveSelected() {
+    if (state.selectedNoteIds.size === 0) {
+        alert('请先选择要移动的笔记');
+        return;
+    }
+    const others = state.subjects.filter((s) => s.id !== state.currentSubjectId);
+    if (others.length === 0) {
+        alert('没有其他科目可以移动，请先新建一个科目');
+        return;
+    }
+
+    const opts = others
+        .map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`)
+        .join('');
+
+    let targetId = others[0].id;
+    const ok = await modal({
+        title: '移动笔记',
+        bodyHTML: `
+      <p style="margin-top:0">将选中的 <strong>${state.selectedNoteIds.size}</strong> 篇笔记移动到：</p>
+      <select id="moveTargetSel">${opts}</select>
+    `,
+        onMount: () => {
+            targetId = $('#moveTargetSel').value;
+            $('#moveTargetSel').addEventListener('change', (e) => { targetId = e.target.value; });
+        },
+        okText: '移动',
+    });
+    if (!ok) return;
+
+    const ids = [...state.selectedNoteIds];
+    for (const id of ids) {
+        const n = state.notes.find((x) => x.id === id);
+        if (n) {
+            n.subjectId = targetId;
+            n.updatedAt = now();
+            await idbPut('notes', n);
+        }
+    }
+    exitSelectionMode();
+}
+
+async function deleteSelected() {
+    if (state.selectedNoteIds.size === 0) {
+        alert('请先选择要删除的笔记');
+        return;
+    }
+    const count = state.selectedNoteIds.size;
+    const ok = await confirmModal(
+        '删除笔记',
+        `确定删除选中的 ${count} 篇笔记？此操作不可撤销。`,
+        '删除',
+        '取消'
+    );
+    if (!ok) return;
+
+    const ids = [...state.selectedNoteIds];
+    for (const id of ids) {
+        await idbDel('notes', id);
+    }
+    state.notes = state.notes.filter((n) => !ids.includes(n.id));
+    exitSelectionMode();
+}
+
+// ============ 删除科目 ============
+async function deleteSubject() {
+    if (!state.currentSubjectId) {
+        alert('请先选择一个科目');
+        return;
+    }
+    const subj = state.subjects.find((s) => s.id === state.currentSubjectId);
+    if (!subj) return;
+
+    const notes = state.notes.filter((n) => n.subjectId === subj.id);
+
+    if (notes.length === 0) {
+        const ok = await confirmModal(
+            '删除科目',
+            `确定删除空科目「${subj.name}」？`,
+            '删除',
+            '取消'
+        );
+        if (!ok) return;
+        await doDeleteSubject(subj, []);
+        return;
+    }
+
+    const ok = await confirmModal(
+        '删除科目',
+        `科目「${subj.name}」下还有 ${notes.length} 篇笔记。\n\n删除科目会同时删除这些笔记，此操作不可撤销。\n\n确定要级联删除吗？`,
+        '删除科目和笔记',
+        '取消'
+    );
+    if (!ok) return;
+    await doDeleteSubject(subj, notes);
+}
+
+async function doDeleteSubject(subj, notesToDelete) {
+    for (const n of notesToDelete) {
+        await idbDel('notes', n.id);
+    }
+    await idbDel('subjects', subj.id);
+
+    state.notes = state.notes.filter((n) => n.subjectId !== subj.id);
+    state.subjects = state.subjects.filter((s) => s.id !== subj.id);
+    state.subjects.forEach((s, i) => { s.order = i; });
+    for (const s of state.subjects) await idbPut('subjects', s);
+
+    if (state.subjects.length > 0) {
+        state.currentSubjectId = state.subjects[0].id;
+    } else {
+        state.currentSubjectId = null;
+    }
+    state.currentNoteId = null;
+    state.selectionMode = false;
+    state.selectedNoteIds.clear();
+
+    const defId = await getSetting('defaultSubjectId', null);
+    if (defId === subj.id) await setSetting('defaultSubjectId', null);
+
+    renderSubjects();
+    renderNotes();
+    renderEditor();
+}
+
+// ============ 确认对话框 ============
+function confirmModal(title, message, okText = '确定', cancelText = '取消') {
+    return modal({
+        title,
+        bodyHTML: `<p style="white-space:pre-wrap;margin:0">${escapeHtml(message)}</p>`,
+        okText,
+        cancelText,
+    });
 }
 
 // ============ 启动 ============

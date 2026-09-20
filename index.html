@@ -28,19 +28,32 @@
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-head">
                 <span class="sidebar-title">科目</span>
-                <button class="icon-btn" id="addSubjectBtn" aria-label="新建科目">＋</button>
+                <div class="sidebar-head-actions">
+                    <button class="icon-btn" id="deleteSubjectBtn" aria-label="删除当前科目">🗑</button>
+                    <button class="icon-btn" id="addSubjectBtn" aria-label="新建科目">＋</button>
+                </div>
             </div>
             <ul class="subject-list" id="subjectList"></ul>
         </aside>
 
         <main class="main">
             <section class="view note-list-view" id="noteListView">
-                <div class="view-head">
+                <div class="view-head" id="noteListViewHead">
                     <h2 id="currentSubjectName">未选择科目</h2>
+                    <button class="icon-btn" id="filterNotesBtn" aria-label="选择笔记">☑</button>
                     <button class="icon-btn" id="addNoteBtn" aria-label="新建笔记">＋</button>
+                </div>
+                <div class="view-head hidden" id="selectionHead">
+                    <button class="icon-btn" id="cancelSelectBtn" aria-label="退出选择">×</button>
+                    <span id="selectedCount" class="selection-count">已选 0 项</span>
+                    <button class="text-btn" id="selectAllBtn">全选</button>
                 </div>
                 <ul class="note-list" id="noteList"></ul>
                 <div class="empty" id="noteListEmpty"></div>
+                <div class="selection-actions hidden" id="selectionActions">
+                    <button class="btn" id="moveSelectedBtn">移动到…</button>
+                    <button class="btn danger" id="deleteSelectedBtn">删除</button>
+                </div>
             </section>
 
             <section class="view editor-view hidden" id="editorView">

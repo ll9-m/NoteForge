@@ -1,4 +1,4 @@
-const CACHE = 'noteforge-v4';
+const CACHE = 'noteforge-v5';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.json', './icon.svg', './fflate.umd.js', './marked.umd.js'];
 
 self.addEventListener('install', (e) => {

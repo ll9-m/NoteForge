@@ -647,3 +647,74 @@ select {
     color: #ff6b6b;
     border-color: #ff6b6b;
 }
+
+/* ===== 导出选择对话框 ===== */
+.export-tree {
+    max-height: 50vh;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.6rem;
+}
+
+.export-subject {
+    border-bottom: 1px solid var(--border);
+    padding: 0.4rem 0;
+}
+
+.export-subject:last-child {
+    border-bottom: none;
+}
+
+.export-subject-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.95rem;
+    user-select: none;
+}
+
+.export-count {
+    color: var(--fg-soft);
+    font-size: 0.8rem;
+    font-weight: 400;
+}
+
+.export-notes {
+    margin-left: 1.6rem;
+    margin-top: 0.2rem;
+}
+
+.export-note-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--fg-soft);
+}
+
+.export-note-item input {
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.export-note-item span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.export-quick {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.export-quick .btn {
+    flex: 1;
+    padding: 0.4rem;
+    font-size: 0.85rem;
+}

@@ -672,6 +672,95 @@ async function renameSubject() {
 
 // ============ 导入导出 ============
 async function exportData() {
+    if (state.subjects.length === 0 && state.notes.length === 0) {
+        alert('没有可导出的内容');
+        return;
+    }
+
+    const subjectBlocks = state.subjects.map((s) => {
+        const notes = state.notes.filter((n) => n.subjectId === s.id);
+        const noteItems = notes.length
+            ? notes
+                .map(
+                    (n) => `
+        <label class="export-note-item">
+          <input type="checkbox" data-note-id="${n.id}" data-subject-id="${s.id}" checked>
+          <span>${escapeHtml(n.title || '(无标题)')}</span>
+        </label>`
+                )
+                .join('')
+            : `<div class="export-note-item" style="color:var(--fg-soft);font-style:italic">（无笔记）</div>`;
+        return `
+      <div class="export-subject">
+        <label class="export-subject-head">
+          <input type="checkbox" data-subject-toggle="${s.id}" checked>
+          <strong>${escapeHtml(s.name)}</strong>
+          <span class="export-count">${notes.length}</span>
+        </label>
+        <div class="export-notes">${noteItems}</div>
+      </div>`;
+    }).join('');
+
+    let selected = null;
+
+    await modal({
+        title: '导出数据',
+        bodyHTML: `
+      <p style="margin:0 0 0.6rem">选择要导出的笔记：</p>
+      <div class="export-tree" id="exportTree">${subjectBlocks || '<div style="color:var(--fg-soft)">还没有科目</div>'}</div>
+      <div class="export-quick">
+        <button type="button" class="btn" id="exportSelectAll">全选</button>
+        <button type="button" class="btn" id="exportSelectNone">全不选</button>
+      </div>
+    `,
+        okText: '导出',
+        onMount: () => {
+            const tree = $('#exportTree');
+
+            tree.addEventListener('change', (e) => {
+                const t = e.target;
+                if (t.dataset.subjectToggle) {
+                    const sid = t.dataset.subjectToggle;
+                    tree.querySelectorAll(`input[data-subject-id="${sid}"]`).forEach((cb) => {
+                        cb.checked = t.checked;
+                    });
+                } else if (t.dataset.noteId) {
+                    const sid = t.dataset.subjectId;
+                    const subs = [...tree.querySelectorAll(`input[data-subject-id="${sid}"]`)];
+                    const parent = tree.querySelector(`input[data-subject-toggle="${sid}"]`);
+                    const anyChecked = subs.some((cb) => cb.checked);
+                    const allChecked = subs.every((cb) => cb.checked);
+                    parent.checked = allChecked;
+                    parent.indeterminate = anyChecked && !allChecked;
+                }
+            });
+
+            $('#exportSelectAll').addEventListener('click', () => {
+                tree.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+                    cb.checked = true; cb.indeterminate = false;
+                });
+            });
+            $('#exportSelectNone').addEventListener('click', () => {
+                tree.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+                    cb.checked = false; cb.indeterminate = false;
+                });
+            });
+        },
+        onOk: () => {
+            selected = new Set();
+            document.querySelectorAll('#exportTree input[data-note-id]:checked').forEach((cb) => {
+                selected.add(cb.dataset.noteId);
+            });
+        },
+    });
+
+    if (!selected) return;
+    if (selected.size === 0) { alert('没有选择任何笔记'); return; }
+
+    await doExport(selected);
+}
+
+async function doExport(selectedNoteIds) {
     const settingsArr = await idbAll('settings');
     const settings = {};
     for (const s of settingsArr) settings[s.key] = s.value;
@@ -681,41 +770,66 @@ async function exportData() {
 
     const enc = new TextEncoder();
     const zipFiles = {};
-    const usedPaths = new Set();
+
+    // 过滤
+    const notes = state.notes.filter((n) => selectedNoteIds.has(n.id));
+    const subjectIds = new Set(notes.map((n) => n.subjectId));
+    const subjects = state.subjects.filter((s) => subjectIds.has(s.id));
+
+    // 找出被引用的图片
+    const referenced = new Set();
+    for (const n of notes) {
+        for (const m of (n.content || '').matchAll(/nf:asset\/([\w-]+)/g)) referenced.add(m[1]);
+    }
+    const allAssets = await idbAll('assets');
+    const assets = allAssets.filter((a) => referenced.has(a.id));
+
+    // 每张图片属于哪个科目（取首次引用的科目）
+    const assetSubject = new Map();
+    for (const n of notes) {
+        const subj = subjects.find((s) => s.id === n.subjectId);
+        if (!subj) continue;
+        const subjDir = safeName(subj.name);
+        for (const m of (n.content || '').matchAll(/nf:asset\/([\w-]+)/g)) {
+            if (!assetSubject.has(m[1])) assetSubject.set(m[1], subjDir);
+        }
+    }
+
     const meta = {
         app: 'noteforge',
-        version: 2,
+        version: 3,
         exportedAt: now(),
         settings,
-        subjects: state.subjects,
+        subjects: subjects.map((s) => ({ id: s.id, name: s.name, order: s.order })),
         assets: [],
         notes: [],
     };
 
-    // 打包 assets
-    const assets = await idbAll('assets');
+    // 打包图片：<科目>/img/<id>.<ext>
     for (const a of assets) {
-        const path = `assets/${a.id}.${a.ext}`;
+        const subjDir = assetSubject.get(a.id) || '_orphan';
+        const path = `${subjDir}/img/${a.id}.${a.ext}`;
         const bytes = new Uint8Array(await a.blob.arrayBuffer());
         zipFiles[path] = [bytes, { level: 0 }];
         meta.assets.push({ id: a.id, name: a.name, type: a.type, ext: a.ext, file: path });
     }
 
-    // 打包笔记
-    for (const n of state.notes) {
-        const subj = state.subjects.find((s) => s.id === n.subjectId);
-        const subjDir = safeName(subj ? subj.name : '_orphan');
+    // 打包笔记：<科目>/md/<标题>.md
+    const usedPaths = new Set();
+    for (const n of notes) {
+        const subj = subjects.find((s) => s.id === n.subjectId);
+        if (!subj) continue;
+        const subjDir = safeName(subj.name);
         const baseName = safeName(n.title || 'untitled');
-        let path = `notes/${subjDir}/${baseName}.md`;
+        let path = `${subjDir}/md/${baseName}.md`;
         let i = 2;
-        while (usedPaths.has(path)) path = `notes/${subjDir}/${baseName}-${i++}.md`;
+        while (usedPaths.has(path)) path = `${subjDir}/md/${baseName}-${i++}.md`;
         usedPaths.add(path);
 
-        // 把 nf:asset/<id> 换成相对路径 ../../assets/<id>.<ext>
         let content = n.content || '';
         content = content.replace(/nf:asset\/([\w-]+)/g, (m, id) => {
             const a = meta.assets.find((x) => x.id === id);
-            return a ? `../../${a.file}` : m;
+            return a ? `../img/${a.id}.${a.ext}` : m;
         });
 
         zipFiles[path] = [enc.encode(content), { level: 6 }];
@@ -729,7 +843,6 @@ async function exportData() {
         });
     }
 
-    // 元数据
     zipFiles['noteforge.json'] = [enc.encode(JSON.stringify(meta, null, 2)), { level: 6 }];
     zipFiles['README.txt'] = [enc.encode(readmeText(meta)), { level: 6 }];
 
@@ -752,16 +865,17 @@ function readmeText(meta) {
 导出时间：${new Date(meta.exportedAt).toLocaleString()}
 
 目录结构：
-  noteforge.json        配置与元数据
-  notes/<科目>/<标题>.md  纯 Markdown 笔记
-  assets/<id>.<ext>     图片等附件
-  README.txt            本文件
+  noteforge.json              配置与元数据
+  <科目>/md/<标题>.md          该科目下的笔记（纯 Markdown）
+  <科目>/img/<id>.<ext>        该科目用到的图片
+  README.txt                  本文件
 
-notes/ 下的 .md 是纯 Markdown，可用任何编辑器打开。
-图片以相对路径 ../../assets/ 引用。
+笔记为纯 Markdown，可用任何编辑器打开。
+图片以相对路径 ../img/ 引用，保持目录结构即可本地预览。
 
-导入时请使用未解压的 zip 文件（可被 7-Zip / WinRAR 重打包，
-但请勿修改内部目录结构）。
+导入时请使用未解压的 zip 文件。
+也可以手动按相同目录结构整理 zip（无需 noteforge.json），
+导入时应用会扫描目录，自动生成对应科目和笔记。
 `;
 }
 
@@ -777,58 +891,159 @@ function importData() {
             const zipFiles = fflate.unzipSync(buf);
             const dec = new TextDecoder();
 
-            const metaRaw = zipFiles['noteforge.json'];
-            if (!metaRaw) throw new Error('缺少 noteforge.json，不是 NoteForge 导出文件');
-            const meta = JSON.parse(dec.decode(metaRaw));
-            if (meta.app !== 'noteforge' || !Array.isArray(meta.subjects) || !Array.isArray(meta.notes)) {
-                throw new Error('noteforge.json 格式不正确');
+            if (zipFiles['noteforge.json']) {
+                await importFromBackup(zipFiles, dec);
+            } else {
+                await importFromManual(zipFiles, dec);
             }
-
-            // 1. 恢复 assets
-            const assetsMeta = Array.isArray(meta.assets) ? meta.assets : [];
-            const assetPathMap = new Map(); // assetId -> zip 路径
-            for (const a of assetsMeta) assetPathMap.set(a.id, a.file);
-
-            for (const a of assetsMeta) {
-                const bytes = zipFiles[a.file];
-                if (!bytes) continue;
-                const blob = new Blob([bytes], { type: a.type || 'application/octet-stream' });
-                await idbPut('assets', {
-                    id: a.id, name: a.name, type: a.type, ext: a.ext, blob, createdAt: now(),
-                });
-                if (assetMap.has(a.id)) URL.revokeObjectURL(assetMap.get(a.id));
-                assetMap.set(a.id, URL.createObjectURL(blob));
-            }
-
-            // 2. 恢复笔记
-            const notes = [];
-            let missing = 0;
-            for (const n of meta.notes) {
-                const raw = zipFiles[n.file];
-                if (!raw) { missing++; continue; }
-                let content = dec.decode(raw);
-                // 把 ../../assets/<id>.<ext> 换回 nf:asset/<id>
-                content = content.replace(/\.\.\/\.\.\/assets\/([\w-]+)\.\w+/g, (m, id) =>
-                    assetPathMap.has(id) ? `nf:asset/${id}` : m
-                );
-                notes.push({ ...n, content });
-            }
-            if (missing > 0) {
-                const go = confirm(`有 ${missing} 篇笔记在 zip 中找不到对应文件，继续导入其余笔记？`);
-                if (!go) return;
-            }
-
-            // 3. 走冲突处理
-            await handleImport({
-                subjects: meta.subjects,
-                notes,
-                settings: meta.settings || {},
-            });
         } catch (err) {
             alert('导入失败：' + err.message);
         }
     };
     input.click();
+}
+
+async function importFromBackup(zipFiles, dec) {
+    const meta = JSON.parse(dec.decode(zipFiles['noteforge.json']));
+    if (meta.app !== 'noteforge' || !Array.isArray(meta.subjects) || !Array.isArray(meta.notes)) {
+        throw new Error('noteforge.json 格式不正确');
+    }
+
+    const assetsMeta = Array.isArray(meta.assets) ? meta.assets : [];
+    const assetPathMap = new Map();
+    for (const a of assetsMeta) assetPathMap.set(a.id, a.file);
+
+    for (const a of assetsMeta) {
+        const bytes = zipFiles[a.file];
+        if (!bytes) continue;
+        const blob = new Blob([bytes], { type: a.type || 'application/octet-stream' });
+        await idbPut('assets', {
+            id: a.id, name: a.name, type: a.type, ext: a.ext, blob, createdAt: now(),
+        });
+        if (assetMap.has(a.id)) URL.revokeObjectURL(assetMap.get(a.id));
+        assetMap.set(a.id, URL.createObjectURL(blob));
+    }
+
+    const notes = [];
+    let missing = 0;
+    for (const n of meta.notes) {
+        const raw = zipFiles[n.file];
+        if (!raw) { missing++; continue; }
+        let content = dec.decode(raw);
+        content = content.replace(/\.\.\/img\/([\w-]+)\.\w+/g, (m, id) =>
+            assetPathMap.has(id) ? `nf:asset/${id}` : m
+        );
+        notes.push({ ...n, content });
+    }
+    if (missing > 0) {
+        const go = confirm(`有 ${missing} 篇笔记在 zip 中找不到对应文件，继续导入其余笔记？`);
+        if (!go) return;
+    }
+
+    await handleImport({
+        subjects: meta.subjects,
+        notes,
+        settings: meta.settings || {},
+    });
+}
+
+async function importFromManual(zipFiles, dec) {
+    const paths = Object.keys(zipFiles);
+    const subjectsMap = new Map();
+
+    for (const path of paths) {
+        const parts = path.split('/');
+        if (parts.length < 3) continue;
+        const subjName = parts[0];
+        const subfolder = parts[1];
+        if (!subjectsMap.has(subjName)) subjectsMap.set(subjName, { notes: [], images: [] });
+
+        if (subfolder === 'md' && path.endsWith('.md')) {
+            subjectsMap.get(subjName).notes.push({
+                filePath: path,
+                fileName: parts[parts.length - 1],
+            });
+        } else if (subfolder === 'img') {
+            subjectsMap.get(subjName).images.push({
+                filePath: path,
+                fileName: parts[parts.length - 1],
+            });
+        }
+    }
+
+    if (subjectsMap.size === 0) {
+        throw new Error('未找到有效目录结构（应为 <科目>/md/*.md 与 <科目>/img/*）');
+    }
+
+    const ts = now();
+    const newSubjects = [];
+    const newNotes = [];
+    let orderIdx = state.subjects.length;
+
+    for (const [subjName, data] of subjectsMap) {
+        if (data.notes.length === 0) continue;
+
+        const subjId = uuid();
+        newSubjects.push({ id: subjId, name: subjName, order: orderIdx++ });
+
+        const imgNameToId = new Map();
+        for (const img of data.images) {
+            const bytes = zipFiles[img.filePath];
+            if (!bytes) continue;
+            const id = uuid();
+            const ext = (img.fileName.match(/\.([^.]+)$/) || [, 'png'])[1].toLowerCase();
+            const mime = guessMime(ext);
+            const blob = new Blob([bytes], { type: mime });
+            await idbPut('assets', {
+                id, name: img.fileName, type: mime, ext, blob, createdAt: ts,
+            });
+            assetMap.set(id, URL.createObjectURL(blob));
+            imgNameToId.set(img.fileName, id);
+        }
+
+        for (const n of data.notes) {
+            let content = dec.decode(zipFiles[n.filePath]);
+            content = content.replace(/\.\.\/img\/([^)\s]+)/g, (m, filename) => {
+                const id = imgNameToId.get(filename);
+                return id ? `nf:asset/${id}` : m;
+            });
+            content = content.replace(/!\[([^\]]*)\]\(img\/([^)]+)\)/g, (m, alt, filename) => {
+                const id = imgNameToId.get(filename);
+                return id ? `![${alt}](nf:asset/${id})` : m;
+            });
+
+            newNotes.push({
+                id: uuid(),
+                subjectId: subjId,
+                title: n.fileName.replace(/\.md$/, ''),
+                content,
+                createdAt: ts,
+                updatedAt: ts,
+            });
+        }
+    }
+
+    if (newSubjects.length === 0) throw new Error('未找到有效的笔记');
+
+    await handleImport({
+        subjects: newSubjects,
+        notes: newNotes,
+        settings: {},
+    });
+}
+
+function guessMime(ext) {
+    const map = {
+        png: 'image/png',
+        jpg: 'image/jpeg',
+        jpeg: 'image/jpeg',
+        gif: 'image/gif',
+        webp: 'image/webp',
+        svg: 'image/svg+xml',
+        bmp: 'image/bmp',
+        ico: 'image/x-icon',
+    };
+    return map[ext] || 'application/octet-stream';
 }
 
 async function handleImport(data) {

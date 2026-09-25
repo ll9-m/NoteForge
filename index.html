@@ -26,14 +26,23 @@
 
     <div class="layout">
         <aside class="sidebar" id="sidebar">
-            <div class="sidebar-head">
+            <div class="sidebar-head" id="sidebarHead">
                 <span class="sidebar-title">科目</span>
                 <div class="sidebar-head-actions">
+                    <button class="icon-btn" id="filterSubjectsBtn" aria-label="选择科目">☑</button>
                     <button class="icon-btn" id="deleteSubjectBtn" aria-label="删除当前科目">🗑</button>
                     <button class="icon-btn" id="addSubjectBtn" aria-label="新建科目">＋</button>
                 </div>
             </div>
+            <div class="sidebar-head hidden" id="subjectSelectionHead">
+                <button class="icon-btn" id="cancelSubjectSelectBtn" aria-label="退出选择">×</button>
+                <span id="selectedSubjectCount" class="selection-count">已选 0 项</span>
+                <button class="text-btn" id="selectAllSubjectsBtn">全选</button>
+            </div>
             <ul class="subject-list" id="subjectList"></ul>
+            <div class="subject-selection-actions hidden" id="subjectSelectionActions">
+                <button class="btn danger" id="deleteSelectedSubjectsBtn">删除</button>
+            </div>
         </aside>
 
         <main class="main">

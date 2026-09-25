@@ -74,6 +74,8 @@ const state = {
     editMode: false,
     selectionMode: false,
     selectedNoteIds: new Set(),
+    subjectSelectionMode: false,
+    selectedSubjectIds: new Set(),
 };
 
 // ============ 初始化 ============
@@ -201,13 +203,26 @@ function renderSubjects() {
         const li = document.createElement('li');
         li.className = 'subject-item' + (s.id === state.currentSubjectId ? ' active' : '');
         li.dataset.id = s.id;
-        li.draggable = true;
+        li.draggable = !state.subjectSelectionMode;
+        if (state.subjectSelectionMode && state.selectedSubjectIds.has(s.id)) {
+            li.classList.add('selected');
+        }
+
+        if (state.subjectSelectionMode) {
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'subject-check';
+            cb.checked = state.selectedSubjectIds.has(s.id);
+            li.appendChild(cb);
+        }
+
         const span = document.createElement('span');
         span.className = 'subject-name';
         span.textContent = s.name;
         li.appendChild(span);
         ul.appendChild(li);
     }
+    updateSubjectSelectionUI();
 }
 
 function renderNotes() {
@@ -353,6 +368,11 @@ function bindEvents() {
     $('#moveSelectedBtn').addEventListener('click', moveSelected);
     $('#deleteSelectedBtn').addEventListener('click', deleteSelected);
 
+    $('#filterSubjectsBtn').addEventListener('click', enterSubjectSelectionMode);
+    $('#cancelSubjectSelectBtn').addEventListener('click', exitSubjectSelectionMode);
+    $('#selectAllSubjectsBtn').addEventListener('click', toggleSelectAllSubjects);
+    $('#deleteSelectedSubjectsBtn').addEventListener('click', deleteSelectedSubjects);
+
     async function insertImage() {
         if (!state.currentNoteId) { alert('请先进入一篇笔记'); return; }
         const input = document.createElement('input');
@@ -404,7 +424,19 @@ function bindEvents() {
     $('#subjectList').addEventListener('click', (e) => {
         const li = e.target.closest('.subject-item');
         if (!li) return;
-        state.currentSubjectId = li.dataset.id;
+        const subjId = li.dataset.id;
+
+        if (state.subjectSelectionMode) {
+            if (state.selectedSubjectIds.has(subjId)) {
+                state.selectedSubjectIds.delete(subjId);
+            } else {
+                state.selectedSubjectIds.add(subjId);
+            }
+            renderSubjects();
+            return;
+        }
+
+        state.currentSubjectId = subjId;
         state.currentNoteId = null;
         state.editMode = false;
         $('#editToggleBtn').textContent = '编辑';
@@ -1326,6 +1358,73 @@ async function deleteSelected() {
     }
     state.notes = state.notes.filter((n) => !ids.includes(n.id));
     exitSelectionMode();
+}
+
+// ============ 科目选择模式 ============
+function enterSubjectSelectionMode() {
+    state.subjectSelectionMode = true;
+    state.selectedSubjectIds.clear();
+    renderSubjects();
+}
+
+function exitSubjectSelectionMode() {
+    state.subjectSelectionMode = false;
+    state.selectedSubjectIds.clear();
+    renderSubjects();
+}
+
+function updateSubjectSelectionUI() {
+    $('#sidebarHead').classList.toggle('hidden', state.subjectSelectionMode);
+    $('#subjectSelectionHead').classList.toggle('hidden', !state.subjectSelectionMode);
+    $('#subjectSelectionActions').classList.toggle('hidden', !state.subjectSelectionMode);
+    $('#selectedSubjectCount').textContent = `已选 ${state.selectedSubjectIds.size} 项`;
+}
+
+function toggleSelectAllSubjects() {
+    const allSelected = state.subjects.length > 0 && state.subjects.every((s) => state.selectedSubjectIds.has(s.id));
+    if (allSelected) {
+        state.selectedSubjectIds.clear();
+    } else {
+        for (const s of state.subjects) state.selectedSubjectIds.add(s.id);
+    }
+    renderSubjects();
+}
+
+async function deleteSelectedSubjects() {
+    if (state.selectedSubjectIds.size === 0) {
+        alert('请先选择要删除的科目');
+        return;
+    }
+    const count = state.selectedSubjectIds.size;
+    const notesCount = state.notes.filter((n) => state.selectedSubjectIds.has(n.subjectId)).length;
+    const msg = notesCount > 0
+        ? `确定删除选中的 ${count} 个科目？\n\n这将同时删除其下的 ${notesCount} 篇笔记，此操作不可撤销。`
+        : `确定删除选中的 ${count} 个空科目？此操作不可撤销。`;
+    const ok = await confirmModal('删除科目', msg, '删除', '取消');
+    if (!ok) return;
+
+    const ids = [...state.selectedSubjectIds];
+    for (const id of ids) {
+        const notes = state.notes.filter((n) => n.subjectId === id);
+        for (const n of notes) await idbDel('notes', n.id);
+        await idbDel('subjects', id);
+    }
+    state.notes = state.notes.filter((n) => !ids.includes(n.subjectId));
+    state.subjects = state.subjects.filter((s) => !ids.includes(s.id));
+    state.subjects.forEach((s, i) => { s.order = i; });
+    for (const s of state.subjects) await idbPut('subjects', s);
+
+    if (ids.includes(state.currentSubjectId)) {
+        state.currentSubjectId = state.subjects.length > 0 ? state.subjects[0].id : null;
+        state.currentNoteId = null;
+    }
+
+    const defId = await getSetting('defaultSubjectId', null);
+    if (defId && ids.includes(defId)) await setSetting('defaultSubjectId', null);
+
+    exitSubjectSelectionMode();
+    renderNotes();
+    renderEditor();
 }
 
 // ============ 删除科目 ============

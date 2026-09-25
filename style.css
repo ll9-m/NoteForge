@@ -212,6 +212,10 @@ select {
     display: none;
 }
 
+.hidden {
+    display: none !important;
+}
+
 .view-head {
     display: flex;
     align-items: center;

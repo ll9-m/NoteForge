@@ -392,6 +392,8 @@ function bindEvents() {
     $('#backBtn').addEventListener('click', () => {
         state.currentNoteId = null;
         state.editMode = false;
+        state.selectionMode = false;
+        state.selectedNoteIds.clear();
         $('#editToggleBtn').textContent = '编辑';
         $('#editorBody').classList.remove('mode-edit');
         $('#editorBody').classList.add('mode-preview');
@@ -404,6 +406,10 @@ function bindEvents() {
         if (!li) return;
         state.currentSubjectId = li.dataset.id;
         state.currentNoteId = null;
+        state.editMode = false;
+        $('#editToggleBtn').textContent = '编辑';
+        $('#editorBody').classList.remove('mode-edit');
+        $('#editorBody').classList.add('mode-preview');
         renderSubjects();
         renderNotes();
         renderEditor();
@@ -557,6 +563,10 @@ async function deleteNote() {
     await idbDel('notes', n.id);
     state.notes = state.notes.filter((x) => x.id !== n.id);
     state.currentNoteId = null;
+    state.editMode = false;
+    $('#editToggleBtn').textContent = '编辑';
+    $('#editorBody').classList.remove('mode-edit');
+    $('#editorBody').classList.add('mode-preview');
     renderNotes();
     renderEditor();
 }
@@ -1345,6 +1355,10 @@ async function doDeleteSubject(subj, notesToDelete) {
     state.currentNoteId = null;
     state.selectionMode = false;
     state.selectedNoteIds.clear();
+    state.editMode = false;
+    $('#editToggleBtn').textContent = '编辑';
+    $('#editorBody').classList.remove('mode-edit');
+    $('#editorBody').classList.add('mode-preview');
 
     const defId = await getSetting('defaultSubjectId', null);
     if (defId === subj.id) await setSetting('defaultSubjectId', null);

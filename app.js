@@ -64,6 +64,8 @@ function idbGet(store, key) {
 async function getSetting(k, d) { const r = await idbGet('settings', k); return r ? r.value : d; }
 async function setSetting(k, v) { await idbPut('settings', { key: k, value: v }); }
 
+let saveTimer = null;
+
 // ============ 状态 ============
 const assetMap = new Map(); // assetId -> blob URL，用于渲染时同步查找
 const state = {
@@ -474,11 +476,16 @@ function bindEvents() {
         renderEditor();
     });
 
-    let saveTimer = null;
     const scheduleSave = () => {
         clearTimeout(saveTimer);
         saveTimer = setTimeout(saveCurrentNote, 300);
     };
+    window.addEventListener('beforeunload', () => {
+        if (saveTimer) {
+            clearTimeout(saveTimer);
+            saveCurrentNote();
+        }
+    });
     $('#noteTitle').addEventListener('input', scheduleSave);
     $('#noteContent').addEventListener('input', () => {
         scheduleSave();
@@ -611,11 +618,38 @@ async function saveCurrentNote() {
     await idbPut('notes', n);
 }
 
+function collectOrphanAssets(noteIds) {
+    const referenced = new Set();
+    for (const n of state.notes) {
+        if (noteIds.includes(n.id)) continue;
+        for (const m of (n.content || '').matchAll(/nf:asset\/([\w-]+)/g)) referenced.add(m[1]);
+    }
+    const orphans = [];
+    for (const id of assetMap.keys()) {
+        if (!referenced.has(id)) orphans.push(id);
+    }
+    return orphans;
+}
+
+async function removeAssets(ids) {
+    for (const id of ids) {
+        if (assetMap.has(id)) {
+            URL.revokeObjectURL(assetMap.get(id));
+            assetMap.delete(id);
+        }
+        await idbDel('assets', id);
+    }
+}
+
 async function deleteNote() {
     if (!state.currentNoteId) return;
     const n = state.notes.find((x) => x.id === state.currentNoteId);
     if (!n) return;
     if (!confirm(`确定删除「${n.title || '无标题'}」？`)) return;
+
+    const orphanIds = collectOrphanAssets([n.id]);
+    await removeAssets(orphanIds);
+
     await idbDel('notes', n.id);
     state.notes = state.notes.filter((x) => x.id !== n.id);
     state.currentNoteId = null;
@@ -1353,11 +1387,25 @@ async function deleteSelected() {
     if (!ok) return;
 
     const ids = [...state.selectedNoteIds];
+
+    const orphanIds = collectOrphanAssets(ids);
+    await removeAssets(orphanIds);
+
     for (const id of ids) {
         await idbDel('notes', id);
     }
     state.notes = state.notes.filter((n) => !ids.includes(n.id));
+
+    if (state.currentNoteId && ids.includes(state.currentNoteId)) {
+        state.currentNoteId = null;
+        state.editMode = false;
+        $('#editToggleBtn').textContent = '编辑';
+        $('#editorBody').classList.remove('mode-edit');
+        $('#editorBody').classList.add('mode-preview');
+    }
+
     exitSelectionMode();
+    renderEditor();
 }
 
 // ============ 科目选择模式 ============
@@ -1404,6 +1452,10 @@ async function deleteSelectedSubjects() {
     if (!ok) return;
 
     const ids = [...state.selectedSubjectIds];
+    const affectedNotes = state.notes.filter((n) => ids.includes(n.subjectId));
+    const orphanIds = collectOrphanAssets(affectedNotes.map((n) => n.id));
+    await removeAssets(orphanIds);
+
     for (const id of ids) {
         const notes = state.notes.filter((n) => n.subjectId === id);
         for (const n of notes) await idbDel('notes', n.id);
@@ -1417,6 +1469,10 @@ async function deleteSelectedSubjects() {
     if (ids.includes(state.currentSubjectId)) {
         state.currentSubjectId = state.subjects.length > 0 ? state.subjects[0].id : null;
         state.currentNoteId = null;
+        state.editMode = false;
+        $('#editToggleBtn').textContent = '编辑';
+        $('#editorBody').classList.remove('mode-edit');
+        $('#editorBody').classList.add('mode-preview');
     }
 
     const defId = await getSetting('defaultSubjectId', null);
@@ -1461,6 +1517,9 @@ async function deleteSubject() {
 }
 
 async function doDeleteSubject(subj, notesToDelete) {
+    const orphanIds = collectOrphanAssets(notesToDelete.map((n) => n.id));
+    await removeAssets(orphanIds);
+
     for (const n of notesToDelete) {
         await idbDel('notes', n.id);
     }

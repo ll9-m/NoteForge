@@ -389,6 +389,14 @@ select {
     background: var(--bg-soft);
 }
 
+.more-menu button.danger-item {
+    color: #d33;
+}
+
+[data-theme="dark"] .more-menu button.danger-item {
+    color: #ff6b6b;
+}
+
 .modal-mask {
     position: fixed;
     inset: 0;

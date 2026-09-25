@@ -605,6 +605,7 @@ function handleAction(a) {
         case 'renameSubject': return renameSubject();
         case 'export': return exportData();
         case 'import': return importData();
+        case 'factoryReset': return factoryReset();
     }
 }
 
@@ -1400,6 +1401,28 @@ function confirmModal(title, message, okText = '确定', cancelText = '取消') 
         okText,
         cancelText,
     });
+}
+
+// ============ 恢复出厂设置 ============
+async function factoryReset() {
+    const ok = await confirmModal(
+        '恢复出厂设置',
+        '将清除所有科目、笔记、图片和设置，恢复到初始状态。\n\n此操作不可撤销，建议先导出数据备份。',
+        '恢复',
+        '取消'
+    );
+    if (!ok) return;
+
+    for (const a of assetMap.values()) URL.revokeObjectURL(a);
+    assetMap.clear();
+
+    db.close();
+    await new Promise((res, rej) => {
+        const r = indexedDB.deleteDatabase('noteforge');
+        r.onsuccess = res;
+        r.onerror = () => rej(r.error);
+    });
+    location.reload();
 }
 
 // ============ 启动 ============

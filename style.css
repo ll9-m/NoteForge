@@ -320,6 +320,15 @@ select {
         display: block;
     }
 
+    .editor-body .note-content {
+        overflow-y: scroll;
+        scrollbar-width: none;
+    }
+
+    .editor-body .note-content::-webkit-scrollbar {
+        display: none;
+    }
+
     #editToggleBtn {
         display: none;
     }

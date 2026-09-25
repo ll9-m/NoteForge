@@ -453,7 +453,31 @@ function bindEvents() {
         updatePreview();
     });
 
+    setupScrollSync();
+
     setupDragDrop();
+}
+
+// ============ 编辑/预览滚动同步（电脑端双向） ============
+function setupScrollSync() {
+    const ta = $('#noteContent');
+    const pv = $('#previewPane');
+    let syncing = false;
+
+    function syncScroll(source, target) {
+        if (syncing) return;
+        if (window.innerWidth <= 768) return;
+        const srcMax = source.scrollHeight - source.clientHeight;
+        const tgtMax = target.scrollHeight - target.clientHeight;
+        if (srcMax <= 0 || tgtMax <= 0) return;
+        syncing = true;
+        const ratio = source.scrollTop / srcMax;
+        target.scrollTop = ratio * tgtMax;
+        requestAnimationFrame(() => { syncing = false; });
+    }
+
+    ta.addEventListener('scroll', () => syncScroll(ta, pv));
+    pv.addEventListener('scroll', () => syncScroll(pv, ta));
 }
 
 // ============ 拖拽排序（桌面） ============

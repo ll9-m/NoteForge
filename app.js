@@ -329,6 +329,8 @@ function bindEvents() {
         if (window.innerWidth <= 768) {
             $('#sidebar').classList.toggle('open');
             $('#overlay').classList.toggle('hidden');
+        } else {
+            $('#sidebar').classList.toggle('collapsed');
         }
     });
     $('#overlay').addEventListener('click', () => {

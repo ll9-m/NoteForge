@@ -296,11 +296,13 @@ function renderEditor() {
             updatePreview();
             $('#noteListView').classList.add('hidden');
             $('#editorView').classList.remove('hidden');
+            $('#editToggleBtn').classList.remove('hidden');
             return;
         }
     }
     $('#noteListView').classList.remove('hidden');
     $('#editorView').classList.add('hidden');
+    $('#editToggleBtn').classList.add('hidden');
 }
 
 // ============ Markdown 渲染（极简版） ============

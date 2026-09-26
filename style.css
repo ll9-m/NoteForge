@@ -19,6 +19,12 @@
     --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-normal: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-slow: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    --code-kw: #cf222e;
+    --code-str: #0a3069;
+    --code-fn: #8250df;
+    --code-num: #0550ae;
+    --code-cm: #6e7781;
+    --code-attr: #953800;
 }
 
 [data-theme="dark"] {
@@ -33,6 +39,12 @@
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
     --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.4);
+    --code-kw: #ff7b72;
+    --code-str: #a5d6ff;
+    --code-fn: #d2a8ff;
+    --code-num: #79c0ff;
+    --code-cm: #8b949e;
+    --code-attr: #ffa657;
 }
 
 * {
@@ -698,6 +710,58 @@ select {
     padding: 0;
 }
 
+.markdown-body .hljs-comment,
+.markdown-body .hljs-quote {
+    color: var(--code-cm);
+    font-style: italic;
+}
+
+.markdown-body .hljs-keyword,
+.markdown-body .hljs-selector-tag,
+.markdown-body .hljs-type,
+.markdown-body .hljs-deletion {
+    color: var(--code-kw);
+}
+
+.markdown-body .hljs-string,
+.markdown-body .hljs-regexp,
+.markdown-body .hljs-addition {
+    color: var(--code-str);
+}
+
+.markdown-body .hljs-number,
+.markdown-body .hljs-literal,
+.markdown-body .hljs-built_in,
+.markdown-body .hljs-bullet {
+    color: var(--code-num);
+}
+
+.markdown-body .hljs-title,
+.markdown-body .hljs-title.function_,
+.markdown-body .hljs-section,
+.markdown-body .hljs-name {
+    color: var(--code-fn);
+}
+
+.markdown-body .hljs-attr,
+.markdown-body .hljs-attribute,
+.markdown-body .hljs-variable,
+.markdown-body .hljs-template-variable,
+.markdown-body .hljs-selector-attr,
+.markdown-body .hljs-selector-class,
+.markdown-body .hljs-symbol,
+.markdown-body .hljs-meta {
+    color: var(--code-attr);
+}
+
+.markdown-body .hljs-emphasis {
+    font-style: italic;
+}
+
+.markdown-body .hljs-strong {
+    font-weight: 700;
+}
+
 .markdown-body blockquote {
     border-left: 3px solid var(--accent);
     padding-left: 0.85rem;
@@ -766,6 +830,7 @@ select {
     margin-right: 0.4em;
     vertical-align: middle;
     accent-color: var(--accent);
+    cursor: pointer;
 }
 
 .markdown-body ul:has(input[type="checkbox"]) {

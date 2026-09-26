@@ -1,5 +1,5 @@
-const CACHE = 'noteforge-v15';
-const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.json', './icon.svg', './fflate.umd.js', './marked.umd.js'];
+const CACHE = 'noteforge-v16';
+const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.json', './icon.svg', './fflate.umd.js', './marked.umd.js', './highlight.min.js'];
 
 self.addEventListener('install', (e) => {
     e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));

@@ -322,7 +322,12 @@ function renderMarkdown(md) {
 }
 
 function updatePreview() {
-    $('#previewPane').innerHTML = renderMarkdown($('#noteContent').value);
+    const pv = $('#previewPane');
+    pv.innerHTML = renderMarkdown($('#noteContent').value);
+    if (window.hljs) {
+        pv.querySelectorAll('pre code[class*="language-"]').forEach((el) => hljs.highlightElement(el));
+    }
+    pv.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.disabled = false; });
 }
 
 // ============ 事件 ============
@@ -465,6 +470,8 @@ function bindEvents() {
 
     setupScrollSync();
 
+    setupTaskToggle();
+
     setupDragDrop();
 
     window.addEventListener('resize', () => updateToolbarVisibility());
@@ -490,6 +497,38 @@ function setupScrollSync() {
 
     ta.addEventListener('scroll', () => syncScroll(ta, pv));
     pv.addEventListener('scroll', () => syncScroll(pv, ta));
+}
+
+// ============ 预览区任务列表点击回写 ============
+function setupTaskToggle() {
+    $('#previewPane').addEventListener('click', (e) => {
+        const cb = e.target.closest('input[type="checkbox"]');
+        if (!cb) return;
+        const idx = [...$('#previewPane').querySelectorAll('input[type="checkbox"]')].indexOf(cb);
+        if (idx >= 0) toggleTaskAt(idx);
+    });
+}
+
+function toggleTaskAt(idx) {
+    const ta = $('#noteContent');
+    const pv = $('#previewPane');
+    const lines = ta.value.split('\n');
+    let seen = -1;
+    let inFence = false;
+    for (let i = 0; i < lines.length; i++) {
+        if (/^\s*(```|~~~)/.test(lines[i])) { inFence = !inFence; continue; }
+        if (inFence) continue;
+        const m = lines[i].match(/^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\])/);
+        if (!m) continue;
+        seen++;
+        if (seen !== idx) continue;
+        lines[i] = m[1] + (m[2] === ' ' ? 'x' : ' ') + m[3] + lines[i].slice(m[0].length);
+        const scrollTop = pv.scrollTop;
+        ta.value = lines.join('\n');
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        pv.scrollTop = scrollTop;
+        return;
+    }
 }
 
 // ============ 拖拽排序（桌面） ============

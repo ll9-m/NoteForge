@@ -103,6 +103,7 @@ async function init() {
     renderNotes();
     renderEditor();
     bindEvents();
+    await initToolbar();
     registerSW();
 }
 
@@ -297,12 +298,14 @@ function renderEditor() {
             $('#noteListView').classList.add('hidden');
             $('#editorView').classList.remove('hidden');
             $('#editToggleBtn').classList.remove('hidden');
+            updateToolbarVisibility();
             return;
         }
     }
     $('#noteListView').classList.remove('hidden');
     $('#editorView').classList.add('hidden');
     $('#editToggleBtn').classList.add('hidden');
+    updateToolbarVisibility();
 }
 
 // ============ Markdown 渲染（极简版） ============
@@ -325,8 +328,6 @@ function updatePreview() {
 // ============ 事件 ============
 function bindEvents() {
 
-    $('#insertImageBtn').addEventListener('click', insertImage);
-
     $('#menuBtn').addEventListener('click', () => {
         if (window.innerWidth <= 768) {
             $('#sidebar').classList.toggle('open');
@@ -346,6 +347,7 @@ function bindEvents() {
         const body = $('#editorBody');
         body.classList.toggle('mode-edit', state.editMode);
         body.classList.toggle('mode-preview', !state.editMode);
+        updateToolbarVisibility();
     });
 
     $('#moreBtn').addEventListener('click', (e) => {
@@ -378,41 +380,6 @@ function bindEvents() {
     $('#cancelSubjectSelectBtn').addEventListener('click', exitSubjectSelectionMode);
     $('#selectAllSubjectsBtn').addEventListener('click', toggleSelectAllSubjects);
     $('#deleteSelectedSubjectsBtn').addEventListener('click', deleteSelectedSubjects);
-
-    async function insertImage() {
-        if (!state.currentNoteId) { alert('请先进入一篇笔记'); return; }
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.multiple = true;
-        input.onchange = async () => {
-            const ta = $('#noteContent');
-            for (const file of input.files) {
-                const id = uuid();
-                const ext = (file.name.match(/\.([^.]+)$/) || [, 'png'])[1].toLowerCase();
-                const asset = {
-                    id,
-                    name: file.name,
-                    type: file.type,
-                    ext,
-                    blob: file,
-                    createdAt: now(),
-                };
-                await idbPut('assets', asset);
-                if (assetMap.has(id)) URL.revokeObjectURL(assetMap.get(id));
-                assetMap.set(id, URL.createObjectURL(file));
-
-                const md = `![${file.name}](nf:asset/${id})`;
-                const start = ta.selectionStart;
-                const end = ta.selectionEnd;
-                ta.value = ta.value.slice(0, start) + md + ta.value.slice(end);
-                ta.selectionStart = ta.selectionEnd = start + md.length;
-            }
-            ta.dispatchEvent(new Event('input'));
-            ta.focus();
-        };
-        input.click();
-    }
 
     $('#deleteNoteBtn').addEventListener('click', deleteNote);
     $('#backBtn').addEventListener('click', () => {
@@ -499,6 +466,8 @@ function bindEvents() {
     setupScrollSync();
 
     setupDragDrop();
+
+    window.addEventListener('resize', () => updateToolbarVisibility());
 }
 
 // ============ 编辑/预览滚动同步（电脑端双向） ============
@@ -670,6 +639,7 @@ function handleAction(a) {
     switch (a) {
         case 'theme': return showTheme();
         case 'fontSize': return showFontSize();
+        case 'toolbar': return showToolbarSettings();
         case 'defaultSubject': return showDefaultSubject();
         case 'template': return showTemplate();
         case 'renameSubject': return renameSubject();
@@ -1585,6 +1555,541 @@ async function factoryReset() {
         r.onerror = () => rej(r.error);
     });
     location.reload();
+}
+
+// ============ 工具栏 ============
+const TOOLBAR_DEFS = [
+    { id: 'T',  label: 'T',  name: '标题',   defaultKey: 'Ctrl+1' },
+    { id: 'B',  label: 'B',  name: '加粗',   defaultKey: 'Ctrl+B' },
+    { id: 'I',  label: 'I',  name: '倾斜',   defaultKey: 'Ctrl+I' },
+    { id: 'S',  label: 'S',  name: '删除线', defaultKey: 'Ctrl+D' },
+    { id: 'L',  label: 'L',  name: '链接/图片', defaultKey: 'Ctrl+K' },
+    { id: 'UL', label: 'UL', name: '无序列表', defaultKey: 'Ctrl+Shift+U' },
+    { id: 'OL', label: 'OL', name: '有序列表', defaultKey: 'Ctrl+Shift+O' },
+    { id: 'TL', label: 'TL', name: '任务列表', defaultKey: 'Ctrl+Shift+T' },
+    { id: 'C',  label: 'C',  name: '表格',   defaultKey: 'Ctrl+Shift+C' },
+    { id: 'R',  label: 'R',  name: '引用',   defaultKey: 'Ctrl+Shift+Q' },
+    { id: 'CB', label: 'CB', name: '代码块', defaultKey: 'Ctrl+Shift+E' },
+    { id: 'UN', label: 'UN', name: '撤销',   defaultKey: 'Ctrl+Z' },
+    { id: 'RE', label: 'RE', name: '重做',   defaultKey: 'Ctrl+Y' },
+];
+
+let tbMode = 'bar';
+let tbHidden = false;
+let tbKeys = {};
+let dialPage = 0;
+let dialPos = { right: 80, bottom: 120 };
+const DIAL_PER_PAGE = 6;
+
+async function initToolbar() {
+    tbMode = await getSetting('tbMode', 'bar');
+    tbHidden = await getSetting('tbHidden', false);
+    const savedKeys = await getSetting('tbKeys', null);
+    tbKeys = {};
+    for (const d of TOOLBAR_DEFS) tbKeys[d.id] = d.defaultKey;
+    if (savedKeys) Object.assign(tbKeys, savedKeys);
+    const savedPos = await getSetting('tbDialPos', null);
+    if (savedPos) dialPos = savedPos;
+
+    renderToolbarButtons();
+    setupShortcuts();
+    setupDial();
+    setupMobileKB();
+    updateToolbarVisibility();
+}
+
+function renderToolbarButtons() {
+    const containers = ['toolbarInline', 'toolbarMobileBar'];
+    for (const cid of containers) {
+        const el = document.getElementById(cid);
+        el.innerHTML = '';
+        for (const d of TOOLBAR_DEFS) {
+            const btn = document.createElement('button');
+            btn.className = 'tb';
+            btn.dataset.toolId = d.id;
+            btn.dataset.tip = d.name + (tbKeys[d.id] ? ' (' + tbKeys[d.id] + ')' : '');
+            btn.innerHTML = `<span>${d.label}</span><span class="tb-sub">${d.name}</span>`;
+            btn.addEventListener('click', () => handleToolbarAction(d.id, btn));
+            el.appendChild(btn);
+        }
+    }
+}
+
+function handleToolbarAction(id, btnEl) {
+    if (!state.currentNoteId) { alert('请先进入一篇笔记'); return; }
+    const ta = $('#noteContent');
+    if (!state.editMode) {
+        state.editMode = true;
+        $('#editToggleBtn').textContent = '预览';
+        $('#editorBody').classList.remove('mode-preview');
+        $('#editorBody').classList.add('mode-edit');
+        ta.focus();
+    }
+
+    switch (id) {
+        case 'T': tbHeading(); break;
+        case 'B': wrapSel('**', '**', '粗体文字'); break;
+        case 'I': wrapSel('*', '*', '斜体文字'); break;
+        case 'S': wrapSel('~~', '~~', '删除线文字'); break;
+        case 'L': showLinkPopup(btnEl); break;
+        case 'UL': toggleLinePrefix('- '); break;
+        case 'OL': toggleLinePrefix('1. '); break;
+        case 'TL': toggleLinePrefix('- [ ] '); break;
+        case 'C': insertBlock('\n| 列1 | 列2 | 列3 |\n| --- | --- | --- |\n| 内容 | 内容 | 内容 |\n'); break;
+        case 'R': toggleLinePrefix('> '); break;
+        case 'CB': insertBlock('\n```\n代码\n```\n'); break;
+        case 'UN': document.execCommand('undo'); break;
+        case 'RE': document.execCommand('redo'); break;
+    }
+}
+
+function tbHeading() {
+    const ta = $('#noteContent');
+    const start = ta.selectionStart;
+    const val = ta.value;
+    const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+    const lineEnd = val.indexOf('\n', start);
+    const line = val.substring(lineStart, lineEnd === -1 ? val.length : lineEnd);
+    const match = line.match(/^(#{1,6})\s/);
+    let newLine, cursorOffset;
+    if (!match) {
+        newLine = '# ' + line;
+        cursorOffset = 2;
+    } else if (match[1].length >= 6) {
+        newLine = line.replace(/^#{1,6}\s/, '');
+        cursorOffset = -(match[1].length + 1);
+    } else {
+        newLine = '#' + line;
+        cursorOffset = 1;
+    }
+    const end = lineEnd === -1 ? val.length : lineEnd;
+    ta.value = val.substring(0, lineStart) + newLine + val.substring(end);
+    ta.selectionStart = ta.selectionEnd = Math.max(lineStart, start + cursorOffset);
+    ta.dispatchEvent(new Event('input'));
+    ta.focus();
+}
+
+function wrapSel(before, after, placeholder) {
+    const ta = $('#noteContent');
+    ta.focus();
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const val = ta.value;
+    const selected = val.substring(start, end);
+    if (selected) {
+        const wrapped = before + selected + after;
+        ta.value = val.substring(0, start) + wrapped + val.substring(end);
+        ta.selectionStart = start + before.length;
+        ta.selectionEnd = start + before.length + selected.length;
+    } else {
+        const text = before + placeholder + after;
+        ta.value = val.substring(0, start) + text + val.substring(end);
+        ta.selectionStart = start + before.length;
+        ta.selectionEnd = start + before.length + placeholder.length;
+    }
+    ta.dispatchEvent(new Event('input'));
+}
+
+function toggleLinePrefix(prefix) {
+    const ta = $('#noteContent');
+    ta.focus();
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const val = ta.value;
+    const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+    const lineEnd = val.indexOf('\n', end);
+    const blockEnd = lineEnd === -1 ? val.length : lineEnd;
+    const block = val.substring(lineStart, blockEnd);
+    const lines = block.split('\n');
+    const allHave = lines.every(l => l.startsWith(prefix));
+    const newLines = lines.map(l => {
+        if (allHave) return l.substring(prefix.length);
+        const existing = l.match(/^(#{1,6}\s|>\s|- \[[ x]\] |- |\d+\. )/);
+        if (existing && prefix !== '## ') return l.substring(existing[0].length);
+        return prefix + l;
+    });
+    const newBlock = newLines.join('\n');
+    ta.value = val.substring(0, lineStart) + newBlock + val.substring(blockEnd);
+    ta.selectionStart = lineStart;
+    ta.selectionEnd = lineStart + newBlock.length;
+    ta.dispatchEvent(new Event('input'));
+}
+
+function insertBlock(text) {
+    const ta = $('#noteContent');
+    ta.focus();
+    const start = ta.selectionStart;
+    const val = ta.value;
+    ta.value = val.substring(0, start) + text + val.substring(start);
+    ta.selectionStart = ta.selectionEnd = start + text.length;
+    ta.dispatchEvent(new Event('input'));
+}
+
+function showLinkPopup(btnEl) {
+    closeLinkPopup();
+    const popup = document.createElement('div');
+    popup.className = 'link-popup';
+    popup.id = 'linkPopup';
+    const btnLink = document.createElement('button');
+    btnLink.textContent = '插入链接';
+    btnLink.addEventListener('click', () => { closeLinkPopup(); insertLink(); });
+    const btnImg = document.createElement('button');
+    btnImg.textContent = '插入图片';
+    btnImg.addEventListener('click', () => { closeLinkPopup(); insertImage(); });
+    popup.append(btnLink, btnImg);
+    document.body.appendChild(popup);
+
+    let top, left;
+    if (btnEl) {
+        const rect = btnEl.getBoundingClientRect();
+        top = rect.bottom + 4;
+        left = rect.left + rect.width / 2 - 70;
+    } else {
+        const ta = $('#noteContent');
+        const taRect = ta.getBoundingClientRect();
+        top = taRect.top + 60;
+        left = taRect.left + taRect.width / 2 - 70;
+    }
+    if (left < 8) left = 8;
+    if (left + 140 > window.innerWidth) left = window.innerWidth - 148;
+    if (top + 100 > window.innerHeight) top = (btnEl ? btnEl.getBoundingClientRect().top : $('#noteContent').getBoundingClientRect().top) - 100;
+    popup.style.top = top + 'px';
+    popup.style.left = left + 'px';
+
+    setTimeout(() => {
+        document.addEventListener('click', closeLinkPopupOutside, { once: true });
+    }, 10);
+}
+
+function closeLinkPopup() {
+    const el = document.getElementById('linkPopup');
+    if (el) el.remove();
+}
+
+function closeLinkPopupOutside(e) {
+    const popup = document.getElementById('linkPopup');
+    if (popup && !popup.contains(e.target)) popup.remove();
+}
+
+async function insertLink() {
+    if (!state.currentNoteId) return;
+    const ta = $('#noteContent');
+    const sel = ta.value.substring(ta.selectionStart, ta.selectionEnd);
+    const url = await promptModal('插入链接', 'https://example.com');
+    if (!url) return;
+    const text = sel || '链接文字';
+    const md = `[${text}](${url})`;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    ta.value = ta.value.substring(0, start) + md + ta.value.substring(end);
+    ta.selectionStart = start;
+    ta.selectionEnd = start + md.length;
+    ta.dispatchEvent(new Event('input'));
+    ta.focus();
+}
+
+async function insertImage() {
+    if (!state.currentNoteId) { alert('请先进入一篇笔记'); return; }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;
+    input.onchange = async () => {
+        const ta = $('#noteContent');
+        for (const file of input.files) {
+            const id = uuid();
+            const ext = (file.name.match(/\.([^.]+)$/) || [, 'png'])[1].toLowerCase();
+            const asset = {
+                id,
+                name: file.name,
+                type: file.type,
+                ext,
+                blob: file,
+                createdAt: now(),
+            };
+            await idbPut('assets', asset);
+            if (assetMap.has(id)) URL.revokeObjectURL(assetMap.get(id));
+            assetMap.set(id, URL.createObjectURL(file));
+
+            const md = `![${file.name}](nf:asset/${id})`;
+            const start = ta.selectionStart;
+            const end = ta.selectionEnd;
+            ta.value = ta.value.slice(0, start) + md + ta.value.slice(end);
+            ta.selectionStart = ta.selectionEnd = start + md.length;
+        }
+        ta.dispatchEvent(new Event('input'));
+        ta.focus();
+    };
+    input.click();
+}
+
+function parseKeyCombo(str) {
+    const parts = str.toLowerCase().split('+').map(s => s.trim());
+    return {
+        ctrl: parts.includes('ctrl'),
+        shift: parts.includes('shift'),
+        alt: parts.includes('alt'),
+        key: parts.filter(p => !['ctrl', 'shift', 'alt'].includes(p))[0] || '',
+    };
+}
+
+function matchesKey(e, combo) {
+    if (!combo || !combo.key) return false;
+    if (e.ctrlKey !== combo.ctrl) return false;
+    if (e.shiftKey !== combo.shift) return false;
+    if (e.altKey !== combo.alt) return false;
+    return e.key.toLowerCase() === combo.key;
+}
+
+function setupShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        if (!state.currentNoteId) return;
+        if (!$('#editorView') || $('#editorView').classList.contains('hidden')) return;
+        const ta = $('#noteContent');
+        if (document.activeElement !== ta && !e.ctrlKey) return;
+
+        for (const d of TOOLBAR_DEFS) {
+            const combo = parseKeyCombo(tbKeys[d.id]);
+            if (matchesKey(e, combo)) {
+                e.preventDefault();
+                if (['UN', 'RE'].includes(d.id)) {
+                    handleToolbarAction(d.id, null);
+                } else {
+                    if (!state.editMode) {
+                        state.editMode = true;
+                        $('#editToggleBtn').textContent = '预览';
+                        $('#editorBody').classList.remove('mode-preview');
+                        $('#editorBody').classList.add('mode-edit');
+                        ta.focus();
+                        updateToolbarVisibility();
+                    }
+                    handleToolbarAction(d.id, null);
+                }
+                return;
+            }
+        }
+    });
+}
+
+function setupDial() {
+    const dial = $('#toolbarDial');
+    const trigger = $('#dialTrigger');
+    let isOpen = false;
+    let longPressTimer = null;
+    let isDragging = false;
+
+    const totalPages = () => Math.ceil(TOOLBAR_DEFS.length / DIAL_PER_PAGE);
+
+    function changePage(delta) {
+        const tp = totalPages();
+        const next = dialPage + delta;
+        if (next >= 0 && next < tp) { dialPage = next; renderDialItems(true); }
+    }
+
+    function updateTriggerTip() {
+        const tp = totalPages();
+        trigger.title = tp > 1 ? `${dialPage + 1}/${tp} 滚轮翻页` : '工具圆盘';
+    }
+    updateTriggerTip();
+
+    trigger.addEventListener('click', () => {
+        if (isDragging) return;
+        isOpen = !isOpen;
+        dial.classList.toggle('open', isOpen);
+        if (isOpen) renderDialItems();
+    });
+
+    trigger.addEventListener('pointerdown', (e) => {
+        isDragging = false;
+        longPressTimer = setTimeout(() => {
+            isDragging = true;
+            trigger.classList.add('dragging');
+            const moveHandler = (ev) => {
+                const x = ev.clientX;
+                const y = ev.clientY;
+                dialPos.right = Math.max(0, window.innerWidth - x - 24);
+                dialPos.bottom = Math.max(0, window.innerHeight - y - 24);
+                applyDialPos();
+            };
+            const upHandler = () => {
+                document.removeEventListener('pointermove', moveHandler);
+                document.removeEventListener('pointerup', upHandler);
+                trigger.classList.remove('dragging');
+                setSetting('tbDialPos', dialPos);
+                setTimeout(() => { isDragging = false; }, 100);
+            };
+            document.addEventListener('pointermove', moveHandler);
+            document.addEventListener('pointerup', upHandler);
+        }, 300);
+    });
+
+    trigger.addEventListener('pointerup', () => {
+        clearTimeout(longPressTimer);
+    });
+
+    trigger.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        changePage(e.deltaY > 0 ? 1 : -1);
+        updateTriggerTip();
+    }, { passive: false });
+
+    applyDialPos();
+
+    const itemsContainer = $('#dialItems');
+    let touchStartY = 0;
+    itemsContainer.addEventListener('touchstart', (e) => {
+        touchStartY = e.touches[0].clientY;
+    });
+    itemsContainer.addEventListener('touchend', (e) => {
+        const dy = e.changedTouches[0].clientY - touchStartY;
+        if (dy < -30) changePage(1);
+        else if (dy > 30) changePage(-1);
+    });
+    itemsContainer.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        changePage(e.deltaY > 0 ? 1 : -1);
+    }, { passive: false });
+}
+
+function applyDialPos() {
+    const dial = $('#toolbarDial');
+    dial.style.right = dialPos.right + 'px';
+    dial.style.bottom = dialPos.bottom + 'px';
+}
+
+function renderDialItems(animate) {
+    const container = $('#dialItems');
+    container.innerHTML = '';
+    const start = dialPage * DIAL_PER_PAGE;
+    const pageItems = TOOLBAR_DEFS.slice(start, start + DIAL_PER_PAGE);
+    const angleStep = 360 / Math.max(pageItems.length, 1);
+    const radius = 64;
+
+    for (let i = 0; i < pageItems.length; i++) {
+        const d = pageItems[i];
+        const angle = (angleStep * i - 90) * (Math.PI / 180);
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius;
+        const btn = document.createElement('button');
+        btn.className = 'dial-item' + (animate ? ' rotate-in' : '');
+        btn.textContent = d.label;
+        btn.title = d.name;
+        btn.style.left = x + 'px';
+        btn.style.top = y + 'px';
+        btn.style.transitionDelay = (i * 30) + 'ms';
+        if (animate) btn.style.animationDelay = (i * 30) + 'ms';
+        btn.addEventListener('click', () => {
+            handleToolbarAction(d.id, btn);
+            $('#toolbarDial').classList.remove('open');
+        });
+        container.appendChild(btn);
+    }
+}
+
+function setupMobileKB() {
+    if (!window.visualViewport) return;
+    const bar = $('#toolbarMobileBar');
+    const vv = window.visualViewport;
+
+    const update = () => {
+        if (tbMode !== 'bar' || tbHidden) return;
+        if (!state.currentNoteId) return;
+        const kbVisible = vv.height < window.innerHeight - 50;
+        if (kbVisible && state.editMode) {
+            bar.classList.remove('hidden');
+            bar.style.bottom = (window.innerHeight - vv.height - vv.offsetTop) + 'px';
+        } else {
+            bar.classList.add('hidden');
+        }
+    };
+
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+}
+
+function updateToolbarVisibility() {
+    const inline = $('#toolbarInline');
+    const mobileBar = $('#toolbarMobileBar');
+    const dial = $('#toolbarDial');
+    const inEditor = state.currentNoteId && !$('#editorView').classList.contains('hidden');
+    const isDesktop = window.innerWidth > 768;
+    const showToolbar = isDesktop ? inEditor : (inEditor && state.editMode);
+
+    inline.classList.toggle('active', showToolbar && !tbHidden && tbMode === 'bar');
+    dial.classList.toggle('hidden', tbHidden || tbMode !== 'dial' || !showToolbar);
+    if (!showToolbar) {
+        mobileBar.classList.add('hidden');
+    }
+}
+
+async function showToolbarSettings() {
+    const mode = await getSetting('tbMode', 'bar');
+    const hidden = await getSetting('tbHidden', false);
+    const savedKeys = await getSetting('tbKeys', {});
+    const keys = { ...Object.fromEntries(TOOLBAR_DEFS.map(d => [d.id, d.defaultKey])), ...savedKeys };
+
+    const rows = TOOLBAR_DEFS.map(d => `
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem">
+            <span style="width:2.5rem;font-weight:700;font-size:0.8rem">${d.label}</span>
+            <span style="flex:1;font-size:0.85rem">${d.name}</span>
+            <input type="text" class="tb-key-input" data-tool="${d.id}" value="${keys[d.id] || ''}"
+                style="width:8rem;padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:0.8rem;background:var(--bg);color:var(--fg)">
+        </div>
+    `).join('');
+
+    await modal({
+        title: '工具栏设置',
+        bodyHTML: `
+            <div style="margin-bottom:0.8rem">
+                <label style="font-size:0.9rem;display:block;margin-bottom:0.4rem">显示形式</label>
+                <div style="display:flex;gap:1rem">
+                    <label style="font-size:0.85rem"><input type="radio" name="tbMode" value="bar" ${mode === 'bar' ? 'checked' : ''}> 横向长栏</label>
+                    <label style="font-size:0.85rem"><input type="radio" name="tbMode" value="dial" ${mode === 'dial' ? 'checked' : ''}> Tab 圆盘</label>
+                </div>
+            </div>
+            <div style="margin-bottom:0.8rem">
+                <label style="font-size:0.85rem"><input type="checkbox" id="tbHideChk" ${hidden ? 'checked' : ''}> 隐藏工具栏</label>
+            </div>
+            <details style="font-size:0.85rem">
+                <summary style="cursor:pointer;margin-bottom:0.5rem">快捷键设置</summary>
+                <p style="color:var(--fg-soft);font-size:0.8rem;margin:0 0 0.5rem">点击输入框后按下组合键（如 Ctrl+B）</p>
+                ${rows}
+            </details>
+        `,
+        onMount: () => {
+            document.querySelectorAll('.tb-key-input').forEach(inp => {
+                inp.addEventListener('keydown', (e) => {
+                    e.preventDefault();
+                    const parts = [];
+                    if (e.ctrlKey) parts.push('Ctrl');
+                    if (e.shiftKey) parts.push('Shift');
+                    if (e.altKey) parts.push('Alt');
+                    if (!['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
+                        parts.push(e.key.length === 1 ? e.key.toUpperCase() : e.key);
+                    }
+                    if (parts.length > 0 && !['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
+                        inp.value = parts.join('+');
+                    }
+                });
+            });
+        },
+        onOk: async () => {
+            const newMode = document.querySelector('input[name="tbMode"]:checked').value;
+            const newHidden = $('#tbHideChk').checked;
+            const newKeys = {};
+            document.querySelectorAll('.tb-key-input').forEach(inp => {
+                newKeys[inp.dataset.tool] = inp.value;
+            });
+            await setSetting('tbMode', newMode);
+            await setSetting('tbHidden', newHidden);
+            await setSetting('tbKeys', newKeys);
+            tbMode = newMode;
+            tbHidden = newHidden;
+            tbKeys = { ...tbKeys, ...newKeys };
+            renderToolbarButtons();
+            updateToolbarVisibility();
+        },
+    });
 }
 
 // ============ 启动 ============

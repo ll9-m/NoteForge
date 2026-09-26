@@ -18,6 +18,7 @@
     <header class="topbar">
         <button class="icon-btn" id="menuBtn" aria-label="菜单">☰</button>
         <div class="brand">NoteForge</div>
+        <div class="toolbar-inline" id="toolbarInline"></div>
         <div class="topbar-actions">
             <button class="text-btn" id="editToggleBtn">编辑</button>
             <button class="icon-btn" id="moreBtn" aria-label="更多">⋮</button>
@@ -69,7 +70,6 @@
                 <div class="view-head">
                     <button class="icon-btn" id="backBtn" aria-label="返回">←</button>
                     <input class="note-title-input" id="noteTitle" type="text" placeholder="标题">
-                    <button class="icon-btn" id="insertImageBtn" aria-label="插入图片">🖼</button>
                     <button class="icon-btn" id="deleteNoteBtn" aria-label="删除笔记">🗑</button>
                 </div>
                 <div class="editor-body mode-preview" id="editorBody">
@@ -81,11 +81,19 @@
         </main>
     </div>
 
+    <div class="toolbar-mobile-bar hidden" id="toolbarMobileBar"></div>
+
+    <div class="toolbar-dial hidden" id="toolbarDial">
+        <button class="dial-trigger" id="dialTrigger">✎</button>
+        <div class="dial-items" id="dialItems"></div>
+    </div>
+
     <div class="overlay hidden" id="overlay"></div>
 
     <div class="more-menu hidden" id="moreMenu">
         <button data-action="theme">外观</button>
         <button data-action="fontSize">字体大小</button>
+        <button data-action="toolbar">工具栏设置</button>
         <button data-action="defaultSubject">默认科目</button>
         <button data-action="template">笔记模板</button>
         <button data-action="renameSubject">重命名当前科目</button>

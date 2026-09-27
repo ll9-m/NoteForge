@@ -201,7 +201,7 @@ print("hello")
 // ============ 渲染 ============
 function renderSubjects() {
     const ul = $('#subjectList');
-    ul.innerHTML = '';
+    const frag = document.createDocumentFragment();
     for (const s of state.subjects) {
         const li = document.createElement('li');
         li.className = 'subject-item' + (s.id === state.currentSubjectId ? ' active' : '');
@@ -223,9 +223,36 @@ function renderSubjects() {
         span.className = 'subject-name';
         span.textContent = s.name;
         li.appendChild(span);
-        ul.appendChild(li);
+        frag.appendChild(li);
     }
+    ul.innerHTML = '';
+    ul.appendChild(frag);
     updateSubjectSelectionUI();
+}
+
+function noteSnippet(content) {
+    for (const raw of String(content || '').split('\n')) {
+        let t = raw.trim();
+        if (!t) continue;
+        if (/^#{1,6}\s/.test(t)) continue;
+        if (/^(---|\*\*\*|___)$/.test(t)) continue;
+        if (/^(```|~~~)/.test(t)) continue;
+        if (/^!\[[^\]]*\]\([^)]*\)$/.test(t)) continue;
+        if (/^\|[\s:|-]+\|$/.test(t)) continue;
+        t = t
+            .replace(/^- \[[ xX]\]\s*/, '')
+            .replace(/^[-*+]\s+/, '')
+            .replace(/^\d+[.)]\s+/, '')
+            .replace(/^>\s*/, '')
+            .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+            .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+            .replace(/`{1,3}([^`]*)`{1,3}/g, '$1')
+            .replace(/(\*\*|__|\*|_|~~)/g, '')
+            .replace(/\|/g, ' ')
+            .trim();
+        if (t) return t;
+    }
+    return '';
 }
 
 function renderNotes() {
@@ -238,7 +265,7 @@ function renderNotes() {
     nameEl.textContent = subj ? subj.name : '未选择科目';
 
     if (!subj) {
-        emptyEl.textContent = '还没有科目，点击左侧 + 新建';
+        emptyEl.innerHTML = '<div class="empty-icon">📚</div><div class="empty-text">还没有科目</div><div class="empty-hint">点击侧边栏的 ＋ 新建一个</div>';
         emptyEl.style.display = 'block';
         updateSelectionUI();
         return;
@@ -248,13 +275,14 @@ function renderNotes() {
         .sort((a, b) => b.updatedAt - a.updatedAt);
 
     if (notes.length === 0) {
-        emptyEl.textContent = '还没有笔记，点击右上角 + 新建一篇';
+        emptyEl.innerHTML = '<div class="empty-icon">✏️</div><div class="empty-text">还没有笔记</div><div class="empty-hint">点击右上角的 ＋ 新建一篇</div>';
         emptyEl.style.display = 'block';
         updateSelectionUI();
         return;
     }
     emptyEl.style.display = 'none';
 
+    const frag = document.createDocumentFragment();
     for (const n of notes) {
         const li = document.createElement('li');
         li.className = 'note-item';
@@ -276,14 +304,22 @@ function renderNotes() {
         const t = document.createElement('div');
         t.className = 'note-item-title';
         t.textContent = n.title || '(无标题)';
-        const m = document.createElement('div');
+
+        const sub = document.createElement('div');
+        sub.className = 'note-item-sub';
+        const sn = document.createElement('span');
+        sn.className = 'note-item-snippet';
+        sn.textContent = noteSnippet(n.content) || '（空笔记）';
+        const m = document.createElement('span');
         m.className = 'note-item-meta';
         m.textContent = formatDate(n.updatedAt);
-        body.append(t, m);
-        li.appendChild(body);
+        sub.append(sn, m);
 
-        ul.appendChild(li);
+        body.append(t, sub);
+        li.appendChild(body);
+        frag.appendChild(li);
     }
+    ul.appendChild(frag);
 
     updateSelectionUI();
 }
@@ -294,6 +330,7 @@ function renderEditor() {
         if (n) {
             $('#noteTitle').value = n.title || '';
             $('#noteContent').value = n.content || '';
+            lastPreviewMd = null;
             updatePreview();
             $('#noteListView').classList.add('hidden');
             $('#editorView').classList.remove('hidden');
@@ -321,13 +358,51 @@ function renderMarkdown(md) {
     });
 }
 
+let previewTimer = null;
+let lastPreviewMd = null;
+const hlCache = new Map();
+
+function schedulePreview() {
+    if (previewTimer) return;
+    previewTimer = setTimeout(() => {
+        previewTimer = null;
+        updatePreview();
+    }, 100);
+}
+
+function highlightBlock(el) {
+    const m = (el.className || '').match(/language-([\w+-]+)/);
+    if (!m) return;
+    const lang = m[1];
+    const code = el.textContent;
+    const key = lang + '\u0000' + code;
+    let html = hlCache.get(key);
+    if (html === undefined) {
+        if (lang && window.hljs && hljs.getLanguage(lang)) {
+            html = hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+        } else {
+            html = escapeHtml(code);
+        }
+        if (hlCache.size > 400) hlCache.clear();
+        hlCache.set(key, html);
+    }
+    el.innerHTML = html;
+}
+
 function updatePreview() {
     const pv = $('#previewPane');
-    pv.innerHTML = renderMarkdown($('#noteContent').value);
-    if (window.hljs) {
-        pv.querySelectorAll('pre code[class*="language-"]').forEach((el) => hljs.highlightElement(el));
+    const md = $('#noteContent').value;
+    if (md === lastPreviewMd) return;
+    lastPreviewMd = md;
+
+    const st = pv.scrollTop;
+    pv.innerHTML = renderMarkdown(md);
+    if (window.hljs && pv.querySelector('pre code')) {
+        pv.querySelectorAll('pre code').forEach(highlightBlock);
     }
+    pv.querySelectorAll('img').forEach((im) => { im.loading = 'lazy'; im.decoding = 'async'; });
     pv.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.disabled = false; });
+    pv.scrollTop = st;
 }
 
 // ============ 事件 ============
@@ -465,16 +540,25 @@ function bindEvents() {
     $('#noteTitle').addEventListener('input', scheduleSave);
     $('#noteContent').addEventListener('input', () => {
         scheduleSave();
-        updatePreview();
+        schedulePreview();
     });
 
     setupScrollSync();
 
     setupTaskToggle();
 
+    setupLightbox();
+
     setupDragDrop();
 
-    window.addEventListener('resize', () => updateToolbarVisibility());
+    let resizeRaf = null;
+    window.addEventListener('resize', () => {
+        if (resizeRaf) return;
+        resizeRaf = requestAnimationFrame(() => {
+            resizeRaf = null;
+            updateToolbarVisibility();
+        });
+    });
 }
 
 // ============ 编辑/预览滚动同步（电脑端双向） ============
@@ -528,6 +612,211 @@ function toggleTaskAt(idx) {
         ta.dispatchEvent(new Event('input', { bubbles: true }));
         pv.scrollTop = scrollTop;
         return;
+    }
+}
+
+// ============ 预览区图片灯箱（放大 / 平移 / 下载） ============
+const lb = { scale: 1, fit: 1, x: 0, y: 0, min: 0.2, max: 8, src: '', name: '', ready: false };
+
+function setupLightbox() {
+    $('#previewPane').addEventListener('click', (e) => {
+        const img = e.target.closest('img');
+        if (!img || !img.src || !img.naturalWidth) return;
+        openLightbox(img);
+    });
+
+    $('#lbClose').addEventListener('click', closeLightbox);
+    $('#lbDownload').addEventListener('click', downloadLbImage);
+    $('#lbZoomIn').addEventListener('click', () => zoomAtStage(1.25));
+    $('#lbZoomOut').addEventListener('click', () => zoomAtStage(1 / 1.25));
+    $('#lbReset').addEventListener('click', resetLbView);
+
+    const stage = $('#lbStage');
+    const img = $('#lbImg');
+
+    img.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        if (Math.abs(lb.scale - lb.fit) > 0.01) {
+            resetLbView();
+        } else {
+            lb.scale = Math.max(1, lb.fit * 2);
+            lb.x = 0;
+            lb.y = 0;
+            applyLb();
+        }
+    });
+
+    stage.addEventListener('wheel', (e) => {
+        if (!lb.ready) return;
+        e.preventDefault();
+        const r = stage.getBoundingClientRect();
+        zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    }, { passive: false });
+
+    // 指针拖拽平移 + 双指捏合缩放
+    const pointers = new Map();
+    let pinchDist = 0, pinchScale = 1, moved = false;
+    const dist = () => {
+        const [a, b] = [...pointers.values()];
+        return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+
+    stage.addEventListener('pointerdown', (e) => {
+        if (!lb.ready) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        stage.setPointerCapture(e.pointerId);
+        moved = false;
+        if (pointers.size === 1) {
+            stage.classList.add('dragging');
+            stage.dataset.ox = lb.x;
+            stage.dataset.oy = lb.y;
+            stage.dataset.px = e.clientX;
+            stage.dataset.py = e.clientY;
+        } else if (pointers.size === 2) {
+            pinchDist = dist() || 1;
+            pinchScale = lb.scale;
+        }
+    });
+
+    stage.addEventListener('pointermove', (e) => {
+        if (!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const r = stage.getBoundingClientRect();
+        if (pointers.size >= 2) {
+            const d = dist();
+            if (pinchDist > 0 && d > 0) {
+                const pts = [...pointers.values()];
+                const mx = (pts[0].x + pts[1].x) / 2 - r.left;
+                const my = (pts[0].y + pts[1].y) / 2 - r.top;
+                zoomTo(mx, my, Math.min(lb.max, Math.max(lb.min, pinchScale * (d / pinchDist))));
+                moved = true;
+            }
+        } else if (pointers.size === 1) {
+            const dx = e.clientX - Number(stage.dataset.px);
+            const dy = e.clientY - Number(stage.dataset.py);
+            if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+            lb.x = Number(stage.dataset.ox) + dx;
+            lb.y = Number(stage.dataset.oy) + dy;
+            img.style.transform = `translate(${lb.x}px, ${lb.y}px) scale(${lb.scale})`;
+        }
+    });
+
+    const endPointer = (e) => {
+        pointers.delete(e.pointerId);
+        if (pointers.size === 0) stage.classList.remove('dragging');
+        if (pointers.size === 1) {
+            const [p] = [...pointers.values()];
+            stage.dataset.ox = lb.x; stage.dataset.oy = lb.y;
+            stage.dataset.px = p.x; stage.dataset.py = p.y;
+        }
+    };
+    stage.addEventListener('pointerup', endPointer);
+    stage.addEventListener('pointercancel', endPointer);
+
+    stage.addEventListener('click', (e) => {
+        if (e.target === stage && !moved) closeLightbox();
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if ($('#lightbox').classList.contains('hidden')) return;
+        if (e.key === 'Escape') { closeLightbox(); return; }
+        if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomAtStage(1.25); }
+        if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomAtStage(1 / 1.25); }
+        if (e.key === '0') { e.preventDefault(); resetLbView(); }
+        if (e.key === 's' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); downloadLbImage(); }
+    });
+}
+
+function openLightbox(img) {
+    lb.src = img.currentSrc || img.src;
+    const alt = (img.alt || '').trim();
+    lb.name = /\.[a-z0-9]+$/i.test(alt) ? alt : '';
+    lb.ready = false;
+    $('#lbTitle').textContent = alt || lb.name || '图片预览';
+
+    const el = $('#lbImg');
+    el.onload = () => {
+        computeFit();
+        lb.ready = true;
+        applyLb();
+    };
+    el.src = lb.src;
+    el.alt = alt;
+    $('#lightbox').classList.remove('hidden');
+    if (el.complete && el.naturalWidth) { computeFit(); lb.ready = true; applyLb(); }
+}
+
+function closeLightbox() {
+    $('#lightbox').classList.add('hidden');
+}
+
+function computeFit() {
+    const r = $('#lbStage').getBoundingClientRect();
+    const el = $('#lbImg');
+    if (!el.naturalWidth || !r.width || !r.height) { lb.fit = 1; return; }
+    lb.fit = Math.min((r.width - 32) / el.naturalWidth, (r.height - 32) / el.naturalHeight, 1);
+    lb.scale = lb.fit;
+    lb.x = 0;
+    lb.y = 0;
+}
+
+function applyLb() {
+    $('#lbImg').style.transform = `translate(${lb.x}px, ${lb.y}px) scale(${lb.scale})`;
+    $('#lbZoomVal').textContent = Math.round(lb.scale * 100) + '%';
+}
+
+function zoomAt(px, py, factor) {
+    zoomTo(px, py, lb.scale * factor);
+}
+
+function zoomTo(px, py, next) {
+    const r = $('#lbStage').getBoundingClientRect();
+    const s1 = lb.scale;
+    const s2 = Math.min(lb.max, Math.max(lb.min, next));
+    if (s2 === s1) return;
+    const cx = r.width / 2, cy = r.height / 2;
+    const ix = (px - cx - lb.x) / s1;
+    const iy = (py - cy - lb.y) / s1;
+    lb.x = px - cx - ix * s2;
+    lb.y = py - cy - iy * s2;
+    lb.scale = s2;
+    applyLb();
+}
+
+function zoomAtStage(factor) {
+    const r = $('#lbStage').getBoundingClientRect();
+    if (!lb.ready) return;
+    zoomAt(r.width / 2, r.height / 2, factor);
+}
+
+function resetLbView() {
+    if (!lb.ready) return;
+    lb.scale = lb.fit;
+    lb.x = 0;
+    lb.y = 0;
+    applyLb();
+}
+
+async function downloadLbImage() {
+    if (!lb.src) return;
+    let name = lb.name;
+    try {
+        const res = await fetch(lb.src);
+        const blob = await res.blob();
+        if (!name) {
+            const ext = ((blob.type.split('/')[1]) || 'png').replace('jpeg', 'jpg');
+            name = `image.${ext}`;
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+        window.open(lb.src, '_blank', 'noopener');
     }
 }
 
@@ -696,6 +985,7 @@ async function showTheme() {
       <option value="auto"${cur === 'auto' ? ' selected' : ''}>跟随系统</option>
       <option value="light"${cur === 'light' ? ' selected' : ''}>浅色</option>
       <option value="dark"${cur === 'dark' ? ' selected' : ''}>深色</option>
+      <option value="glass"${cur === 'glass' ? ' selected' : ''}>液态玻璃</option>
     </select>`,
         onOk: async () => {
             const v = $('#themeSel').value;

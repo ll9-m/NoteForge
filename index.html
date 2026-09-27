@@ -103,6 +103,25 @@
         <button data-action="factoryReset" class="danger-item">恢复出厂设置</button>
     </div>
 
+    <div class="lightbox hidden" id="lightbox" role="dialog" aria-modal="true" aria-label="图片查看">
+        <div class="lb-toolbar">
+            <span class="lb-title" id="lbTitle"></span>
+            <div class="lb-actions">
+                <button class="icon-btn" id="lbDownload" aria-label="下载图片" title="下载">⬇</button>
+                <button class="icon-btn" id="lbClose" aria-label="关闭" title="关闭 (Esc)">×</button>
+            </div>
+        </div>
+        <div class="lb-stage" id="lbStage">
+            <img class="lb-img" id="lbImg" alt="">
+        </div>
+        <div class="lb-zoombar">
+            <button class="icon-btn" id="lbZoomOut" aria-label="缩小">－</button>
+            <span class="lb-zoomval" id="lbZoomVal">100%</span>
+            <button class="icon-btn" id="lbZoomIn" aria-label="放大">＋</button>
+            <button class="icon-btn" id="lbReset" aria-label="重置缩放" title="重置">⤢</button>
+        </div>
+    </div>
+
     <div class="modal-mask hidden" id="modalMask">
         <div class="modal">
             <div class="modal-head">

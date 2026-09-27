@@ -2311,6 +2311,17 @@ function setupDial() {
 
     dial.addEventListener('contextmenu', (e) => e.preventDefault());
     dial.addEventListener('selectstart', (e) => e.preventDefault());
+    dial.addEventListener('pointerdown', () => {
+        const s = document.getSelection();
+        if (s && !s.isCollapsed) s.removeAllRanges();
+    });
+    document.addEventListener('selectionchange', () => {
+        if (!dial.classList.contains('open')) return;
+        const s = document.getSelection();
+        if (!s || s.isCollapsed) return;
+        const n = s.anchorNode;
+        if (n && dial.contains(n.nodeType === 1 ? n : n.parentNode)) s.removeAllRanges();
+    });
 
     trigger.addEventListener('wheel', (e) => {
         e.preventDefault();

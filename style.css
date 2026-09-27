@@ -272,9 +272,7 @@ select {
     padding: 0.6rem 0.85rem;
     position: sticky;
     top: 0;
-    background: color-mix(in srgb, var(--bg) 90%, transparent);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: var(--bg);
     z-index: 1;
 }
 
@@ -1770,7 +1768,7 @@ select:focus-visible {
 }
 
 [data-theme="glass"] .sidebar-head {
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.95);
 }
 
 [data-theme="glass"] .note-content {

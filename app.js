@@ -65,6 +65,7 @@ async function getSetting(k, d) { const r = await idbGet('settings', k); return 
 async function setSetting(k, v) { await idbPut('settings', { key: k, value: v }); }
 
 let saveTimer = null;
+let subjectDragJustEnded = false;
 
 // ============ 状态 ============
 const assetMap = new Map(); // assetId -> blob URL，用于渲染时同步查找
@@ -476,6 +477,7 @@ function bindEvents() {
     });
 
     $('#subjectList').addEventListener('click', (e) => {
+        if (subjectDragJustEnded) return;
         const li = e.target.closest('.subject-item');
         if (!li) return;
         const subjId = li.dataset.id;
@@ -852,6 +854,73 @@ function setupDragDrop() {
         if (!after) ul.appendChild(dragging);
         else ul.insertBefore(dragging, after);
     });
+
+    // 触摸端：长按 300ms 进入拖拽排序
+    let touchTimer = null;
+    let touchDragEl = null;
+    ul.addEventListener('touchstart', (e) => {
+        if (state.subjectSelectionMode || touchDragEl) return;
+        const li = e.target.closest('.subject-item');
+        if (!li) return;
+        const startY = e.touches[0].clientY;
+        let started = false;
+        let moved = false;
+
+        const cleanup = () => {
+            document.removeEventListener('touchmove', onMove);
+            document.removeEventListener('touchend', onEnd);
+            document.removeEventListener('touchcancel', onEnd);
+        };
+        touchTimer = setTimeout(() => {
+            touchTimer = null;
+            started = true;
+            touchDragEl = li;
+            li.classList.add('dragging');
+            if (navigator.vibrate && (!navigator.userActivation || navigator.userActivation.hasBeenActive)) {
+                navigator.vibrate(30);
+            }
+        }, 300);
+
+        const onMove = (ev) => {
+            const y = ev.touches[0].clientY;
+            if (!started) {
+                if (Math.abs(y - startY) > 10) {
+                    clearTimeout(touchTimer);
+                    touchTimer = null;
+                    cleanup();
+                }
+                return;
+            }
+            ev.preventDefault();
+            const after = getDragAfter(ul, y);
+            if (!after && ul.lastElementChild !== touchDragEl) {
+                ul.appendChild(touchDragEl);
+                moved = true;
+            } else if (after && after !== touchDragEl && after.previousElementSibling !== touchDragEl) {
+                ul.insertBefore(touchDragEl, after);
+                moved = true;
+            }
+            const scrollBox = ul.parentElement;
+            const r = ul.getBoundingClientRect();
+            if (y < r.top + 44) scrollBox.scrollBy(0, -10);
+            else if (y > r.bottom - 44) scrollBox.scrollBy(0, 10);
+        };
+        const onEnd = () => {
+            clearTimeout(touchTimer);
+            touchTimer = null;
+            cleanup();
+            if (started && touchDragEl) {
+                touchDragEl.classList.remove('dragging');
+                touchDragEl = null;
+                subjectDragJustEnded = true;
+                setTimeout(() => { subjectDragJustEnded = false; }, 400);
+                if (moved) persistSubjectOrder();
+            }
+        };
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('touchend', onEnd);
+        document.addEventListener('touchcancel', onEnd);
+    }, { passive: true });
 }
 
 function getDragAfter(ul, y) {

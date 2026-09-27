@@ -463,6 +463,7 @@ function bindEvents() {
 
     $('#deleteNoteBtn').addEventListener('click', deleteNote);
     $('#backBtn').addEventListener('click', () => {
+        flushSave();
         state.currentNoteId = null;
         state.editMode = false;
         state.selectionMode = false;
@@ -490,6 +491,7 @@ function bindEvents() {
         }
 
         state.currentSubjectId = subjId;
+        flushSave();
         state.currentNoteId = null;
         state.editMode = false;
         $('#editToggleBtn').textContent = '编辑';
@@ -519,6 +521,7 @@ function bindEvents() {
             return;
         }
 
+        flushSave();
         state.currentNoteId = noteId;
         state.editMode = false;
         $('#editToggleBtn').textContent = '编辑';
@@ -526,6 +529,14 @@ function bindEvents() {
         $('#editorBody').classList.add('mode-preview');
         renderEditor();
     });
+
+    function flushSave() {
+        if (saveTimer) {
+            clearTimeout(saveTimer);
+            saveTimer = null;
+            saveCurrentNote();
+        }
+    }
 
     const scheduleSave = () => {
         clearTimeout(saveTimer);
@@ -1588,10 +1599,12 @@ function promptModal(title, placeholder) {
 
 // ============ Service Worker ============
 function registerSW() {
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('sw.js').catch(() => { });
-        });
+    if (!('serviceWorker' in navigator)) return;
+    const doRegister = () => navigator.serviceWorker.register('sw.js').catch(() => { });
+    if (document.readyState === 'complete') {
+        doRegister();
+    } else {
+        window.addEventListener('load', doRegister, { once: true });
     }
 }
 
@@ -2203,6 +2216,8 @@ function setupShortcuts() {
 function setupDial() {
     const dial = $('#toolbarDial');
     const trigger = $('#dialTrigger');
+    const pageUp = $('#dialPageUp');
+    const pageDown = $('#dialPageDown');
     let isOpen = false;
     let longPressTimer = null;
     let isDragging = false;
@@ -2213,14 +2228,22 @@ function setupDial() {
     function changePage(delta) {
         const tp = totalPages();
         const next = dialPage + delta;
-        if (next >= 0 && next < tp) { dialPage = next; renderDialItems(true); }
+        if (next >= 0 && next < tp) { dialPage = next; renderDialItems(true); updateTriggerTip(); }
     }
 
     function updateTriggerTip() {
         const tp = totalPages();
         trigger.title = tp > 1 ? `${dialPage + 1}/${tp} 滚轮翻页` : '工具圆盘';
+        pageUp.classList.toggle('at-limit', dialPage <= 0);
+        pageDown.classList.toggle('at-limit', dialPage >= tp - 1);
     }
     updateTriggerTip();
+    if (totalPages() <= 1) {
+        pageUp.classList.add('off');
+        pageDown.classList.add('off');
+    }
+    pageUp.addEventListener('click', () => changePage(-1));
+    pageDown.addEventListener('click', () => changePage(1));
 
     trigger.addEventListener('click', () => {
         if (isDragging) return;
@@ -2292,7 +2315,6 @@ function setupDial() {
     trigger.addEventListener('wheel', (e) => {
         e.preventDefault();
         changePage(e.deltaY > 0 ? 1 : -1);
-        updateTriggerTip();
     }, { passive: false });
 
     applyDialPos();
@@ -2336,6 +2358,10 @@ function renderDialItems(animate) {
         btn.className = 'dial-item' + (animate ? ' rotate-in' : '');
         btn.textContent = d.label;
         btn.title = d.name;
+        const nm = document.createElement('span');
+        nm.className = 'dial-name';
+        nm.textContent = d.name;
+        btn.appendChild(nm);
         btn.style.left = x + 'px';
         btn.style.top = y + 'px';
         btn.style.transitionDelay = (i * 30) + 'ms';

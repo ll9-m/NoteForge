@@ -1349,6 +1349,8 @@ select:focus-visible {
     box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
     z-index: 35;
     overflow-x: auto;
+    justify-content: center;
+    justify-content: safe center;
     scrollbar-width: none;
     animation: slideUp 0.2s ease;
     transition: bottom 0.15s ease;
@@ -1383,6 +1385,10 @@ select:focus-visible {
     position: fixed;
     z-index: 36;
     transition: opacity var(--transition-fast);
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .toolbar-dial.hidden {
@@ -1404,8 +1410,31 @@ select:focus-visible {
     transition: all var(--transition-fast);
     user-select: none;
     -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
     position: relative;
     z-index: 2;
+}
+
+.dial-trigger::after {
+    content: '';
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    opacity: 0;
+    transform: scale(0.75);
+    pointer-events: none;
+}
+
+.dial-trigger.pending::after {
+    animation: dialArm 0.3s linear forwards;
+}
+
+@keyframes dialArm {
+    from { opacity: 0.9; transform: scale(0.75); }
+    to   { opacity: 1; transform: scale(1); }
 }
 
 .dial-trigger:hover {
@@ -1450,11 +1479,14 @@ select:focus-visible {
     justify-content: center;
     box-shadow: var(--shadow-sm);
     cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
     transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
     transform: translate(-50%, -50%) scale(0);
     opacity: 0;
-    user-select: none;
-    -webkit-user-select: none;
 }
 
 .toolbar-dial.open .dial-item {

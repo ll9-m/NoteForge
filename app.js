@@ -2206,6 +2206,7 @@ function setupDial() {
     let isOpen = false;
     let longPressTimer = null;
     let isDragging = false;
+    let moveGuard = null;
 
     const totalPages = () => Math.ceil(TOOLBAR_DEFS.length / DIAL_PER_PAGE);
 
@@ -2230,7 +2231,24 @@ function setupDial() {
 
     trigger.addEventListener('pointerdown', (e) => {
         isDragging = false;
+        const sx = e.clientX;
+        const sy = e.clientY;
+        moveGuard = (ev) => {
+            if (Math.abs(ev.clientX - sx) > 10 || Math.abs(ev.clientY - sy) > 10) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+                trigger.classList.remove('pending');
+                document.removeEventListener('pointermove', moveGuard);
+                moveGuard = null;
+            }
+        };
+        trigger.classList.add('pending');
+        document.addEventListener('pointermove', moveGuard);
         longPressTimer = setTimeout(() => {
+            longPressTimer = null;
+            trigger.classList.remove('pending');
+            document.removeEventListener('pointermove', moveGuard);
+            moveGuard = null;
             isDragging = true;
             trigger.classList.add('dragging');
             const moveHandler = (ev) => {
@@ -2243,18 +2261,33 @@ function setupDial() {
             const upHandler = () => {
                 document.removeEventListener('pointermove', moveHandler);
                 document.removeEventListener('pointerup', upHandler);
+                document.removeEventListener('pointercancel', upHandler);
                 trigger.classList.remove('dragging');
                 setSetting('tbDialPos', dialPos);
                 setTimeout(() => { isDragging = false; }, 100);
             };
             document.addEventListener('pointermove', moveHandler);
             document.addEventListener('pointerup', upHandler);
+            document.addEventListener('pointercancel', upHandler);
         }, 300);
     });
 
     trigger.addEventListener('pointerup', () => {
         clearTimeout(longPressTimer);
+        longPressTimer = null;
+        trigger.classList.remove('pending');
+        if (moveGuard) { document.removeEventListener('pointermove', moveGuard); moveGuard = null; }
     });
+
+    trigger.addEventListener('pointercancel', () => {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+        trigger.classList.remove('pending');
+        if (moveGuard) { document.removeEventListener('pointermove', moveGuard); moveGuard = null; }
+    });
+
+    dial.addEventListener('contextmenu', (e) => e.preventDefault());
+    dial.addEventListener('selectstart', (e) => e.preventDefault());
 
     trigger.addEventListener('wheel', (e) => {
         e.preventDefault();
@@ -2321,14 +2354,15 @@ function setupMobileKB() {
     const vv = window.visualViewport;
 
     const update = () => {
-        if (tbMode !== 'bar' || tbHidden) return;
-        if (!state.currentNoteId) return;
+        if (tbMode !== 'bar' || tbHidden || !state.currentNoteId) {
+            bar.style.bottom = '';
+            return;
+        }
         const kbVisible = vv.height < window.innerHeight - 50;
-        if (kbVisible && state.editMode) {
-            bar.classList.remove('hidden');
+        if (kbVisible) {
             bar.style.bottom = (window.innerHeight - vv.height - vv.offsetTop) + 'px';
         } else {
-            bar.classList.add('hidden');
+            bar.style.bottom = '';
         }
     };
 
@@ -2346,9 +2380,7 @@ function updateToolbarVisibility() {
 
     inline.classList.toggle('active', showToolbar && !tbHidden && tbMode === 'bar');
     dial.classList.toggle('hidden', tbHidden || tbMode !== 'dial' || !showToolbar);
-    if (!showToolbar) {
-        mobileBar.classList.add('hidden');
-    }
+    mobileBar.classList.toggle('hidden', !showToolbar || tbHidden || tbMode !== 'bar');
 }
 
 async function showToolbarSettings() {

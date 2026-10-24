@@ -1992,3 +1992,115 @@ select:focus-visible {
     color: var(--fg-soft);
     align-self: center;
 }
+
+/* ===== 笔记大纲 ===== */
+.editor-view {
+    position: relative;
+}
+
+.outline-panel {
+    position: absolute;
+    top: 3.2rem;
+    right: 0.6rem;
+    width: min(300px, 85vw);
+    max-height: 60vh;
+    overflow-y: auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-md);
+    padding: 0.4rem;
+    z-index: 45;
+}
+
+.outline-item {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    width: 100%;
+    border: none;
+    background: none;
+    color: var(--fg);
+    font-size: 0.85rem;
+    text-align: left;
+    padding: 0.4rem 0.5rem;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+
+.outline-item:hover {
+    background: var(--accent-soft);
+}
+
+.outline-level {
+    flex-shrink: 0;
+    font-size: 0.68rem;
+    color: var(--fg-soft);
+    font-variant-numeric: tabular-nums;
+}
+
+.outline-text {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.outline-empty {
+    padding: 0.8rem 0.6rem;
+    font-size: 0.82rem;
+    color: var(--fg-soft);
+    text-align: center;
+}
+
+/* ===== 历史版本 ===== */
+.hist-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-height: 55vh;
+    overflow-y: auto;
+}
+
+.hist-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.hist-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.hist-time {
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.hist-preview {
+    font-size: 0.75rem;
+    color: var(--fg-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 0.15rem;
+}
+
+.hist-restore {
+    flex-shrink: 0;
+    padding: 0.3rem 0.8rem;
+    font-size: 0.8rem;
+}
+
+/* ===== KaTeX 预览适配 ===== */
+.markdown-body .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.25rem 0;
+}

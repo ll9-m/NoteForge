@@ -21,13 +21,16 @@ function escapeHtml(s) {
 let db;
 function openDB() {
     return new Promise((res, rej) => {
-        const r = indexedDB.open('noteforge', 2);
+        const r = indexedDB.open('noteforge', 3);
         r.onupgradeneeded = (e) => {
             const d = e.target.result;
             if (!d.objectStoreNames.contains('subjects')) d.createObjectStore('subjects', { keyPath: 'id' });
             if (!d.objectStoreNames.contains('notes')) d.createObjectStore('notes', { keyPath: 'id' });
             if (!d.objectStoreNames.contains('settings')) d.createObjectStore('settings', { keyPath: 'key' });
             if (!d.objectStoreNames.contains('assets')) d.createObjectStore('assets', { keyPath: 'id' });
+            if (!d.objectStoreNames.contains('snapshots')) {
+                d.createObjectStore('snapshots', { keyPath: 'id', autoIncrement: true });
+            }
         };
         r.onsuccess = () => res(r.result);
         r.onerror = () => rej(r.error);
@@ -475,6 +478,151 @@ function updateTagFilterChip() {
     }
 }
 
+// ============ 历史版本查看与恢复 ============
+async function showNoteHistory() {
+    const n = state.notes.find((x) => x.id === state.currentNoteId);
+    if (!n) return;
+    const snaps = (await idbAll('snapshots'))
+        .filter((s) => s.noteId === n.id)
+        .sort((a, b) => b.savedAt - a.savedAt);
+    if (snaps.length === 0) {
+        await confirmModal('历史版本', '还没有历史版本。\n\n编辑保存后每 10 分钟自动留一个版本（同一内容不会重复保存，最多保留 20 个）。', '知道了', null);
+        return;
+    }
+
+    const rows = snaps.map((s) => `
+      <div class="hist-row">
+        <div class="hist-info">
+          <div class="hist-time">${formatDate(s.savedAt)}</div>
+          <div class="hist-preview">${escapeHtml((s.content || '').replace(/\s+/g, ' ').slice(0, 50)) || '（空内容）'}</div>
+        </div>
+        <button type="button" class="btn hist-restore" data-id="${s.id}">恢复</button>
+      </div>`).join('');
+
+    let restoreId = null;
+    await modal({
+        title: `历史版本（${snaps.length}）`,
+        bodyHTML: `<div class="hist-list">${rows}</div>`,
+        okText: '关闭',
+        cancelText: null,
+        onMount: () => {
+            document.querySelectorAll('.hist-restore').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    restoreId = btn.dataset.id;
+                    $('#modalOk').click();
+                });
+            });
+        },
+    });
+
+    if (restoreId === null) return;
+    const s = snaps.find((x) => String(x.id) === String(restoreId));
+    if (!s) return;
+    const ok = await confirmModal(
+        '恢复历史版本',
+        `将正文恢复到 ${formatDate(s.savedAt)} 的版本？\n\n恢复前会自动把当前内容存为一个历史版本，随时可以再恢复回来。`,
+        '恢复',
+        '取消'
+    );
+    if (!ok) return;
+
+    await flushPendingSave();
+    if (n.content !== s.content) {
+        await idbPut('snapshots', { noteId: n.id, title: n.title, content: n.content, savedAt: now() });
+    }
+    n.content = s.content;
+    n.updatedAt = now();
+    await idbPut('notes', n);
+    $('#noteContent').value = n.content;
+    lastPreviewMd = null;
+    updatePreview();
+    renderNotes();
+}
+
+// ============ 笔记大纲 ============
+let outlineOpen = false;
+
+function buildOutline() {
+    const lines = $('#noteContent').value.split('\n');
+    const items = [];
+    let inFence = false;
+    for (let i = 0; i < lines.length; i++) {
+        if (/^\s*(```|~~~)/.test(lines[i])) { inFence = !inFence; continue; }
+        if (inFence) continue;
+        const m = lines[i].match(/^(#{1,6})\s+(.*)/);
+        if (m) items.push({ level: m[1].length, text: m[2].trim(), line: i });
+    }
+    return items;
+}
+
+function renderOutline() {
+    const panel = $('#outlinePanel');
+    const items = buildOutline();
+    panel.innerHTML = '';
+    if (items.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'outline-empty';
+        empty.textContent = '没有标题，用 # 开头即可生成大纲';
+        panel.appendChild(empty);
+        return;
+    }
+    for (let idx = 0; idx < items.length; idx++) {
+        const it = items[idx];
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'outline-item';
+        row.style.paddingLeft = (0.5 + (it.level - 1) * 0.8) + 'rem';
+        row.title = it.text;
+        const tag = document.createElement('span');
+        tag.className = 'outline-level';
+        tag.textContent = 'H' + it.level;
+        const txt = document.createElement('span');
+        txt.className = 'outline-text';
+        txt.textContent = it.text || '(空标题)';
+        row.append(tag, txt);
+        row.addEventListener('click', () => {
+            goToOutlineItem(idx);
+            toggleOutlinePanel(false);
+        });
+        panel.appendChild(row);
+    }
+}
+
+function toggleOutlinePanel(open) {
+    const panel = $('#outlinePanel');
+    outlineOpen = open === undefined ? !outlineOpen : open;
+    if (outlineOpen) renderOutline();
+    panel.classList.toggle('hidden', !outlineOpen);
+}
+
+function goToOutlineItem(idx) {
+    const ta = $('#noteContent');
+    const items = buildOutline();
+    const it = items[idx];
+    if (!it) return;
+
+    if (state.editMode) {
+        // 编辑态：把光标定位到该行并滚动过去
+        const lines = ta.value.split('\n');
+        let pos = 0;
+        for (let i = 0; i < it.line; i++) pos += lines[i].length + 1;
+        ta.focus();
+        ta.selectionStart = ta.selectionEnd = pos;
+        const before = ta.value.slice(0, pos);
+        const lineNo = before.split('\n').length;
+        const approx = (lineNo / (lines.length || 1)) * ta.scrollHeight;
+        ta.scrollTop = Math.max(0, approx - ta.clientHeight / 2);
+    } else {
+        // 预览态：滚动到渲染后的对应标题
+        const pv = $('#previewPane');
+        const heads = pv.querySelectorAll('h1,h2,h3,h4,h5,h6');
+        const el = heads[idx];
+        if (el) {
+            pv.scrollTop = el.getBoundingClientRect().top - pv.getBoundingClientRect().top + pv.scrollTop - 12;
+        }
+    }
+}
+
 function renderEditor() {
     if (state.currentNoteId) {
         const n = state.notes.find((x) => x.id === state.currentNoteId);
@@ -485,6 +633,7 @@ function renderEditor() {
             updatePreview();
             updateStarBtn();
             renderTagBar();
+            maybeSnapshot(n, true); // 打开笔记时留一个"编辑前"版本
             $('#noteListView').classList.add('hidden');
             $('#editorView').classList.remove('hidden');
             $('#editToggleBtn').classList.remove('hidden');
@@ -500,16 +649,64 @@ function renderEditor() {
 }
 
 // ============ Markdown 渲染（极简版） ============
+const katexCache = new Map();
+const MATH_PH = (i) => `\x00MATH${i}\x00`;
+
+function renderTex(tex, display) {
+    const key = (display ? 'D' : 'I') + '\u0000' + tex;
+    let html = katexCache.get(key);
+    if (html === undefined) {
+        try {
+            html = window.katex
+                ? katex.renderToString(tex, { displayMode: display, throwOnError: false, output: 'html' })
+                : escapeHtml(display ? `$$${tex}$$` : `$${tex}$`);
+            if (katexCache.size > 300) katexCache.clear();
+            katexCache.set(key, html);
+        } catch (e) {
+            html = escapeHtml(tex);
+        }
+    }
+    return html;
+}
+
 function renderMarkdown(md) {
     // 先把内部的 nf:asset/<id> 引用换成 blob URL
-    const pre = md.replace(/!\[([^\]]*)\]\(nf:asset\/([\w-]+)\)/g, (m, alt, id) => {
+    let pre = md.replace(/!\[([^\]]*)\]\(nf:asset\/([\w-]+)\)/g, (m, alt, id) => {
         const url = assetMap.get(id);
         return url ? `![${alt}](${url})` : `![图片丢失:${id}]()`;
     });
-    return marked.parse(pre, {
+
+    // 提取公式为占位符，防止 marked 破坏 TeX 语法；代码块内的 $ 不处理
+    const mathTokens = [];
+    pre = pre.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/).map((part) => {
+        if (part.startsWith('```') || part.startsWith('~~~')) return part;
+        part = part.replace(/\$\$([\s\S]+?)\$\$/g, (m, tex) => {
+            mathTokens.push({ tex, display: true });
+            return MATH_PH(mathTokens.length - 1);
+        });
+        part = part.replace(/\$(?!\s)((?:\\.|[^$\\\n])+?)\$/g, (m, tex, off, str) => {
+            // Pandoc 式启发：开 $ 后不能是空白，闭 $ 前不能是空白，闭 $ 后不能紧跟数字（"$5 和 $10" 不是公式）
+            const after = str[off + m.length];
+            if (!tex.trim() || /\s$/.test(tex) || (after && /\d/.test(after))) return m;
+            mathTokens.push({ tex, display: false });
+            return MATH_PH(mathTokens.length - 1);
+        });
+        return part;
+    }).join('');
+
+    let html = marked.parse(pre, {
         gfm: true,      // 表格、任务列表、删除线
         breaks: true,   // 单个换行当换行处理（便签场景更自然）
     });
+
+    // 占位符换回渲染好的公式
+    if (mathTokens.length) {
+        html = html.replace(/\x00MATH(\d+)\x00/g, (m, i) => {
+            const t = mathTokens[+i];
+            return t ? renderTex(t.tex, t.display) : m;
+        });
+    }
+    return html;
 }
 
 let previewTimer = null;
@@ -616,6 +813,19 @@ function bindEvents() {
     $('#deleteSelectedSubjectsBtn').addEventListener('click', deleteSelectedSubjects);
 
     $('#deleteNoteBtn').addEventListener('click', deleteNote);
+    $('#historyNoteBtn').addEventListener('click', showNoteHistory);
+    $('#outlineBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleOutlinePanel();
+    });
+    document.addEventListener('click', (e) => {
+        if (outlineOpen && !$('#outlinePanel').contains(e.target) && e.target !== $('#outlineBtn')) {
+            toggleOutlinePanel(false);
+        }
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && outlineOpen) toggleOutlinePanel(false);
+    });
     $('#starNoteBtn').addEventListener('click', async () => {
         const n = state.notes.find((x) => x.id === state.currentNoteId);
         if (!n) return;
@@ -633,6 +843,7 @@ function bindEvents() {
         state.searchQuery = '';
         $('#noteSearch').value = '';
         state.tagFilter = null;
+        toggleOutlinePanel(false);
         $('#editToggleBtn').textContent = '编辑';
         $('#editorBody').classList.remove('mode-edit');
         $('#editorBody').classList.add('mode-preview');
@@ -1194,6 +1405,35 @@ async function saveCurrentNote() {
     n.content = $('#noteContent').value;
     n.updatedAt = now();
     await idbPut('notes', n);
+    maybeSnapshot(n);
+}
+
+// ============ 笔记历史版本（快照） ============
+const SNAPSHOT_MIN_INTERVAL = 10 * 60 * 1000; // 内容有变化时，至多每 10 分钟留一个版本
+const MAX_SNAPSHOTS_PER_NOTE = 20;
+let lastSnapCheck = 0;
+
+async function maybeSnapshot(n, force) {
+    try {
+        if (!force && now() - lastSnapCheck < 60 * 1000) return; // 检查本身也要节流
+        lastSnapCheck = now();
+        const all = await idbAll('snapshots');
+        const mine = all.filter((s) => s.noteId === n.id).sort((a, b) => b.savedAt - a.savedAt);
+        const last = mine[0];
+        if (last && last.content === n.content && last.title === n.title) return; // 没变化不留快照
+        if (last && !force && n.updatedAt - last.savedAt < SNAPSHOT_MIN_INTERVAL) return;
+        await idbPut('snapshots', { noteId: n.id, title: n.title, content: n.content, savedAt: n.updatedAt || now() });
+        if (mine.length >= MAX_SNAPSHOTS_PER_NOTE) {
+            for (const s of mine.slice(MAX_SNAPSHOTS_PER_NOTE - 1)) await idbDel('snapshots', s.id);
+        }
+    } catch (e) { /* 快照失败不影响正常保存 */ }
+}
+
+async function deleteSnapshotsFor(noteIds) {
+    const all = await idbAll('snapshots');
+    for (const s of all) {
+        if (noteIds.includes(s.noteId)) await idbDel('snapshots', s.id);
+    }
 }
 
 function collectOrphanAssets(noteIds) {
@@ -1228,6 +1468,7 @@ async function deleteNote() {
 
     const orphanIds = collectOrphanAssets([n.id]);
     await removeAssets(orphanIds);
+    await deleteSnapshotsFor([n.id]);
 
     await idbDel('notes', n.id);
     state.notes = state.notes.filter((x) => x.id !== n.id);
@@ -1828,6 +2069,7 @@ function modal({ title, bodyHTML, onOk, onCancel, onMount, okText, cancelText })
         $('#modalBody').innerHTML = bodyHTML || '';
         $('#modalOk').textContent = okText || '确定';
         $('#modalCancel').textContent = cancelText || '取消';
+        $('#modalCancel').style.display = cancelText === null ? 'none' : '';
         $('#modalMask').classList.remove('hidden');
         if (onMount) onMount();
 
@@ -1994,6 +2236,7 @@ async function deleteSelected() {
 
     const orphanIds = collectOrphanAssets(ids);
     await removeAssets(orphanIds);
+    await deleteSnapshotsFor(ids);
 
     for (const id of ids) {
         await idbDel('notes', id);
@@ -2125,6 +2368,7 @@ async function deleteSubject() {
 async function doDeleteSubject(subj, notesToDelete) {
     const orphanIds = collectOrphanAssets(notesToDelete.map((n) => n.id));
     await removeAssets(orphanIds);
+    await deleteSnapshotsFor(notesToDelete.map((n) => n.id));
 
     for (const n of notesToDelete) {
         await idbDel('notes', n.id);

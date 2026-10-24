@@ -9,9 +9,11 @@
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon.svg">
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="katex.min.css">
     <script src="fflate.umd.js"></script>
     <script src="marked.umd.js"></script>
     <script src="highlight.min.js"></script>
+    <script src="katex.min.js"></script>
 </head>
 
 <body>
@@ -75,10 +77,13 @@
                 <div class="view-head">
                     <button class="icon-btn" id="backBtn" aria-label="返回">←</button>
                     <input class="note-title-input" id="noteTitle" type="text" placeholder="标题">
+                    <button class="icon-btn" id="outlineBtn" aria-label="大纲" title="大纲">📑</button>
+                    <button class="icon-btn" id="historyNoteBtn" aria-label="历史版本" title="历史版本">🕒</button>
                     <button class="icon-btn" id="starNoteBtn" aria-label="收藏笔记" title="收藏/取消收藏">☆</button>
                     <button class="icon-btn" id="deleteNoteBtn" aria-label="删除笔记">🗑</button>
                 </div>
                 <div class="tag-bar hidden" id="noteTagBar"></div>
+                <div class="outline-panel hidden" id="outlinePanel"></div>
                 <div class="editor-body mode-preview" id="editorBody">
                     <textarea class="note-content" id="noteContent" placeholder="开始写 Markdown..."
                         spellcheck="false"></textarea>

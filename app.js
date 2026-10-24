@@ -67,6 +67,17 @@ async function setSetting(k, v) { await idbPut('settings', { key: k, value: v })
 let saveTimer = null;
 let subjectDragJustEnded = false;
 
+// 立即落盘尚未保存的编辑（清掉防抖定时器）。删除类操作前必须先调用，
+// 否则：1) 待删笔记可能在 idbDel 之后被定时器重新写回（幽灵笔记）；
+// 2) 刚插入还未保存的图片引用会被 collectOrphanAssets 误判为孤儿而删除。
+async function flushPendingSave() {
+    if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        await saveCurrentNote();
+    }
+}
+
 // ============ 状态 ============
 const assetMap = new Map(); // assetId -> blob URL，用于渲染时同步查找
 const state = {
@@ -464,7 +475,7 @@ function bindEvents() {
 
     $('#deleteNoteBtn').addEventListener('click', deleteNote);
     $('#backBtn').addEventListener('click', () => {
-        flushSave();
+        flushPendingSave();
         state.currentNoteId = null;
         state.editMode = false;
         state.selectionMode = false;
@@ -493,7 +504,7 @@ function bindEvents() {
         }
 
         state.currentSubjectId = subjId;
-        flushSave();
+        flushPendingSave();
         state.currentNoteId = null;
         state.editMode = false;
         $('#editToggleBtn').textContent = '编辑';
@@ -523,7 +534,7 @@ function bindEvents() {
             return;
         }
 
-        flushSave();
+        flushPendingSave();
         state.currentNoteId = noteId;
         state.editMode = false;
         $('#editToggleBtn').textContent = '编辑';
@@ -532,13 +543,6 @@ function bindEvents() {
         renderEditor();
     });
 
-    function flushSave() {
-        if (saveTimer) {
-            clearTimeout(saveTimer);
-            saveTimer = null;
-            saveCurrentNote();
-        }
-    }
 
     const scheduleSave = () => {
         clearTimeout(saveTimer);
@@ -1026,6 +1030,7 @@ async function deleteNote() {
     if (!state.currentNoteId) return;
     const n = state.notes.find((x) => x.id === state.currentNoteId);
     if (!n) return;
+    await flushPendingSave();
     if (!confirm(`确定删除「${n.title || '无标题'}」？`)) return;
 
     const orphanIds = collectOrphanAssets([n.id]);
@@ -1339,7 +1344,8 @@ async function doExport(selectedNoteIds) {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    // 立即 revoke 可能导致部分浏览器取消下载，延迟回收
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function readmeText(meta) {
@@ -1762,6 +1768,7 @@ async function deleteSelected() {
         alert('请先选择要删除的笔记');
         return;
     }
+    await flushPendingSave();
     const count = state.selectedNoteIds.size;
     const ok = await confirmModal(
         '删除笔记',
@@ -1828,6 +1835,7 @@ async function deleteSelectedSubjects() {
         alert('请先选择要删除的科目');
         return;
     }
+    await flushPendingSave();
     const count = state.selectedSubjectIds.size;
     const notesCount = state.notes.filter((n) => state.selectedSubjectIds.has(n.subjectId)).length;
     const msg = notesCount > 0
@@ -1874,6 +1882,7 @@ async function deleteSubject() {
         alert('请先选择一个科目');
         return;
     }
+    await flushPendingSave();
     const subj = state.subjects.find((s) => s.id === state.currentSubjectId);
     if (!subj) return;
 
@@ -2256,6 +2265,8 @@ function setupShortcuts() {
     document.addEventListener('keydown', (e) => {
         if (!state.currentNoteId) return;
         if (!$('#editorView') || $('#editorView').classList.contains('hidden')) return;
+        // 设置弹窗打开时（如快捷键录入框）不触发工具快捷键
+        if (!$('#modalMask').classList.contains('hidden')) return;
         const ta = $('#noteContent');
         if (document.activeElement !== ta && !e.ctrlKey) return;
 

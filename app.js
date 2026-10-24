@@ -90,6 +90,7 @@ const state = {
     selectedNoteIds: new Set(),
     subjectSelectionMode: false,
     selectedSubjectIds: new Set(),
+    searchQuery: '',
 };
 
 // ============ 初始化 ============
@@ -275,6 +276,7 @@ function renderNotes() {
 
     const subj = state.subjects.find((s) => s.id === state.currentSubjectId);
     nameEl.textContent = subj ? subj.name : '未选择科目';
+    $('#noteSearchRow').classList.toggle('hidden', !subj);
 
     if (!subj) {
         emptyEl.innerHTML = '<div class="empty-icon">📚</div><div class="empty-text">还没有科目</div><div class="empty-hint">点击侧边栏的 ＋ 新建一个</div>';
@@ -282,12 +284,12 @@ function renderNotes() {
         updateSelectionUI();
         return;
     }
-    const notes = state.notes
-        .filter((n) => n.subjectId === subj.id)
-        .sort((a, b) => b.updatedAt - a.updatedAt);
+    const notes = visibleNotes(subj);
 
     if (notes.length === 0) {
-        emptyEl.innerHTML = '<div class="empty-icon">✏️</div><div class="empty-text">还没有笔记</div><div class="empty-hint">点击右上角的 ＋ 新建一篇</div>';
+        emptyEl.innerHTML = state.searchQuery
+            ? '<div class="empty-icon">🔍</div><div class="empty-text">没有找到匹配的笔记</div><div class="empty-hint">换个关键词试试</div>'
+            : '<div class="empty-icon">✏️</div><div class="empty-text">还没有笔记</div><div class="empty-hint">点击右上角的 ＋ 新建一篇</div>';
         emptyEl.style.display = 'block';
         updateSelectionUI();
         return;
@@ -321,7 +323,8 @@ function renderNotes() {
         sub.className = 'note-item-sub';
         const sn = document.createElement('span');
         sn.className = 'note-item-snippet';
-        sn.textContent = noteSnippet(n.content) || '（空笔记）';
+        const q = state.searchQuery.trim().toLowerCase();
+        sn.textContent = (q ? searchSnippet(n.content, q) : noteSnippet(n.content)) || '（空笔记）';
         const m = document.createElement('span');
         m.className = 'note-item-meta';
         m.textContent = formatDate(n.updatedAt);
@@ -329,11 +332,51 @@ function renderNotes() {
 
         body.append(t, sub);
         li.appendChild(body);
+
+        if (!state.selectionMode) {
+            const star = document.createElement('button');
+            star.className = 'note-star' + (n.starred ? ' on' : '');
+            star.textContent = n.starred ? '★' : '☆';
+            star.title = n.starred ? '取消收藏' : '收藏';
+            li.appendChild(star);
+        }
         frag.appendChild(li);
     }
     ul.appendChild(frag);
 
     updateSelectionUI();
+}
+
+// 当前科目下、按搜索词过滤后的可见笔记：收藏的置顶，其余按更新时间倒序
+function visibleNotes(subj) {
+    let notes = state.notes.filter((n) => n.subjectId === subj.id);
+    const q = state.searchQuery.trim().toLowerCase();
+    if (q) {
+        notes = notes.filter((n) =>
+            (n.title || '').toLowerCase().includes(q) ||
+            (n.content || '').toLowerCase().includes(q));
+    }
+    return notes.sort((a, b) =>
+        ((b.starred ? 1 : 0) - (a.starred ? 1 : 0)) || (b.updatedAt - a.updatedAt));
+}
+
+// 搜索命中时展示命中位置附近的内容，而不是笔记开头
+function searchSnippet(content, q) {
+    const text = String(content || '');
+    const idx = text.toLowerCase().indexOf(q);
+    if (idx < 0) return noteSnippet(text);
+    const start = Math.max(0, idx - 20);
+    const end = Math.min(text.length, idx + q.length + 40);
+    const raw = text.slice(start, end).replace(/\s+/g, ' ').trim();
+    return (start > 0 ? '…' : '') + raw + (end < text.length ? '…' : '');
+}
+
+function updateStarBtn() {
+    const n = state.notes.find((x) => x.id === state.currentNoteId);
+    const btn = $('#starNoteBtn');
+    if (!n) { btn.textContent = '☆'; btn.classList.remove('on'); return; }
+    btn.textContent = n.starred ? '★' : '☆';
+    btn.classList.toggle('on', !!n.starred);
 }
 
 function renderEditor() {
@@ -344,6 +387,7 @@ function renderEditor() {
             $('#noteContent').value = n.content || '';
             lastPreviewMd = null;
             updatePreview();
+            updateStarBtn();
             $('#noteListView').classList.add('hidden');
             $('#editorView').classList.remove('hidden');
             $('#editToggleBtn').classList.remove('hidden');
@@ -474,12 +518,22 @@ function bindEvents() {
     $('#deleteSelectedSubjectsBtn').addEventListener('click', deleteSelectedSubjects);
 
     $('#deleteNoteBtn').addEventListener('click', deleteNote);
+    $('#starNoteBtn').addEventListener('click', async () => {
+        const n = state.notes.find((x) => x.id === state.currentNoteId);
+        if (!n) return;
+        n.starred = !n.starred;
+        await idbPut('notes', n);
+        updateStarBtn();
+        renderNotes();
+    });
     $('#backBtn').addEventListener('click', () => {
         flushPendingSave();
         state.currentNoteId = null;
         state.editMode = false;
         state.selectionMode = false;
         state.selectedNoteIds.clear();
+        state.searchQuery = '';
+        $('#noteSearch').value = '';
         $('#editToggleBtn').textContent = '编辑';
         $('#editorBody').classList.remove('mode-edit');
         $('#editorBody').classList.add('mode-preview');
@@ -507,6 +561,8 @@ function bindEvents() {
         flushPendingSave();
         state.currentNoteId = null;
         state.editMode = false;
+        state.searchQuery = '';
+        $('#noteSearch').value = '';
         $('#editToggleBtn').textContent = '编辑';
         $('#editorBody').classList.remove('mode-edit');
         $('#editorBody').classList.add('mode-preview');
@@ -519,10 +575,23 @@ function bindEvents() {
         }
     });
 
-    $('#noteList').addEventListener('click', (e) => {
+    $('#noteList').addEventListener('click', async (e) => {
         const li = e.target.closest('.note-item');
         if (!li) return;
         const noteId = li.dataset.id;
+
+        // 列表项上的收藏星标：只切换收藏，不打开笔记
+        const starBtn = e.target.closest('.note-star');
+        if (starBtn && !state.selectionMode) {
+            const n = state.notes.find((x) => x.id === noteId);
+            if (n) {
+                n.starred = !n.starred;
+                await idbPut('notes', n);
+                if (state.currentNoteId === n.id) updateStarBtn();
+                renderNotes();
+            }
+            return;
+        }
 
         if (state.selectionMode) {
             if (state.selectedNoteIds.has(noteId)) {
@@ -558,6 +627,15 @@ function bindEvents() {
     $('#noteContent').addEventListener('input', () => {
         scheduleSave();
         schedulePreview();
+    });
+
+    let searchTimer = null;
+    $('#noteSearch').addEventListener('input', (e) => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+            state.searchQuery = e.target.value.trim();
+            renderNotes();
+        }, 150);
     });
 
     setupScrollSync();
@@ -736,6 +814,8 @@ function setupLightbox() {
 
     document.addEventListener('keydown', (e) => {
         if ($('#lightbox').classList.contains('hidden')) return;
+        // 弹窗打开时按键交给弹窗（Esc 先关弹窗）
+        if (!$('#modalMask').classList.contains('hidden')) return;
         if (e.key === 'Escape') { closeLightbox(); return; }
         if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomAtStage(1.25); }
         if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomAtStage(1 / 1.25); }
@@ -1329,6 +1409,7 @@ async function doExport(selectedNoteIds) {
             file: path,
             createdAt: n.createdAt,
             updatedAt: n.updatedAt,
+            starred: !!n.starred,
         });
     }
 
@@ -1632,6 +1713,15 @@ function modal({ title, bodyHTML, onOk, onCancel, onMount, okText, cancelText })
         $('#modalMask').classList.remove('hidden');
         if (onMount) onMount();
 
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                e.stopImmediatePropagation();
+                cancelHandler();
+            }
+        };
+        const maskHandler = (e) => {
+            if (e.target === $('#modalMask')) cancelHandler();
+        };
         const okHandler = async () => {
             if (onOk) await onOk();
             close();
@@ -1647,10 +1737,14 @@ function modal({ title, bodyHTML, onOk, onCancel, onMount, okText, cancelText })
             $('#modalOk').removeEventListener('click', okHandler);
             $('#modalCancel').removeEventListener('click', cancelHandler);
             $('#modalClose').removeEventListener('click', cancelHandler);
+            document.removeEventListener('keydown', escHandler);
+            $('#modalMask').removeEventListener('click', maskHandler);
         };
         $('#modalOk').addEventListener('click', okHandler);
         $('#modalCancel').addEventListener('click', cancelHandler);
         $('#modalClose').addEventListener('click', cancelHandler);
+        document.addEventListener('keydown', escHandler);
+        $('#modalMask').addEventListener('click', maskHandler);
     });
 }
 
@@ -1710,7 +1804,7 @@ function updateSelectionUI() {
 function toggleSelectAll() {
     const subj = state.subjects.find((s) => s.id === state.currentSubjectId);
     if (!subj) return;
-    const notes = state.notes.filter((n) => n.subjectId === subj.id);
+    const notes = visibleNotes(subj);
     const allSelected = notes.length > 0 && notes.every((n) => state.selectedNoteIds.has(n.id));
     if (allSelected) {
         state.selectedNoteIds.clear();

@@ -1836,3 +1836,57 @@ select:focus-visible {
 [data-theme="glass"] .subject-item.active {
     background: rgba(255, 255, 255, 0.6);
 }
+
+/* ===== 笔记搜索 ===== */
+.note-search-row {
+    padding: 0.6rem 0.75rem 0;
+}
+
+.note-search {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    color: var(--fg);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.note-search:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.note-search::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+}
+
+/* ===== 收藏星标 ===== */
+.note-star {
+    flex-shrink: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+    color: var(--fg-soft);
+    padding: 0.3rem;
+    border-radius: 50%;
+    transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.note-star:hover {
+    color: #f5a623;
+    transform: scale(1.2);
+}
+
+.note-star.on {
+    color: #f5a623;
+}
+
+#starNoteBtn.on {
+    color: #f5a623;
+}

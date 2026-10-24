@@ -1890,3 +1890,105 @@ select:focus-visible {
 #starNoteBtn.on {
     color: #f5a623;
 }
+
+/* ===== 标签系统 ===== */
+.note-search-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.tag-filter-chip {
+    flex-shrink: 0;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 0.78rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: filter var(--transition-fast);
+    white-space: nowrap;
+}
+
+.tag-filter-chip:hover {
+    filter: brightness(0.96);
+}
+
+.tag-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 1rem 0;
+}
+
+.tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.18rem 0.6rem;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 0.78rem;
+    line-height: 1.4;
+}
+
+.tag-x {
+    border: none;
+    background: none;
+    color: inherit;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0 0.1rem;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.tag-x:hover {
+    opacity: 1;
+}
+
+.tag-add-btn {
+    border: 1px dashed var(--border);
+    background: none;
+    color: var(--fg-soft);
+    border-radius: 999px;
+    padding: 0.18rem 0.7rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.tag-add-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.note-item-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.35rem;
+}
+
+.note-tag {
+    font-size: 0.72rem;
+    padding: 0.06rem 0.5rem;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    cursor: pointer;
+    transition: filter var(--transition-fast);
+}
+
+.note-tag:hover {
+    filter: brightness(0.93);
+}
+
+.note-tag-more {
+    font-size: 0.72rem;
+    color: var(--fg-soft);
+    align-self: center;
+}

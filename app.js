@@ -91,6 +91,7 @@ const state = {
     subjectSelectionMode: false,
     selectedSubjectIds: new Set(),
     searchQuery: '',
+    tagFilter: null,
 };
 
 // ============ 初始化 ============
@@ -277,6 +278,7 @@ function renderNotes() {
     const subj = state.subjects.find((s) => s.id === state.currentSubjectId);
     nameEl.textContent = subj ? subj.name : '未选择科目';
     $('#noteSearchRow').classList.toggle('hidden', !subj);
+    updateTagFilterChip();
 
     if (!subj) {
         emptyEl.innerHTML = '<div class="empty-icon">📚</div><div class="empty-text">还没有科目</div><div class="empty-hint">点击侧边栏的 ＋ 新建一个</div>';
@@ -287,9 +289,11 @@ function renderNotes() {
     const notes = visibleNotes(subj);
 
     if (notes.length === 0) {
-        emptyEl.innerHTML = state.searchQuery
-            ? '<div class="empty-icon">🔍</div><div class="empty-text">没有找到匹配的笔记</div><div class="empty-hint">换个关键词试试</div>'
-            : '<div class="empty-icon">✏️</div><div class="empty-text">还没有笔记</div><div class="empty-hint">点击右上角的 ＋ 新建一篇</div>';
+        emptyEl.innerHTML = state.tagFilter
+            ? `<div class="empty-icon">🏷</div><div class="empty-text">没有带「${escapeHtml(state.tagFilter)}」标签的笔记</div>`
+            : state.searchQuery
+                ? '<div class="empty-icon">🔍</div><div class="empty-text">没有找到匹配的笔记</div><div class="empty-hint">换个关键词试试</div>'
+                : '<div class="empty-icon">✏️</div><div class="empty-text">还没有笔记</div><div class="empty-hint">点击右上角的 ＋ 新建一篇</div>';
         emptyEl.style.display = 'block';
         updateSelectionUI();
         return;
@@ -331,6 +335,28 @@ function renderNotes() {
         sub.append(sn, m);
 
         body.append(t, sub);
+
+        const tags = n.tags || [];
+        if (tags.length) {
+            const tagRow = document.createElement('div');
+            tagRow.className = 'note-item-tags';
+            for (const tg of tags.slice(0, 3)) {
+                const chip = document.createElement('span');
+                chip.className = 'note-tag';
+                chip.textContent = tg;
+                chip.dataset.tag = tg;
+                chip.title = '按标签筛选';
+                tagRow.appendChild(chip);
+            }
+            if (tags.length > 3) {
+                const more = document.createElement('span');
+                more.className = 'note-tag-more';
+                more.textContent = '+' + (tags.length - 3);
+                tagRow.appendChild(more);
+            }
+            body.appendChild(tagRow);
+        }
+
         li.appendChild(body);
 
         if (!state.selectionMode) {
@@ -347,14 +373,18 @@ function renderNotes() {
     updateSelectionUI();
 }
 
-// 当前科目下、按搜索词过滤后的可见笔记：收藏的置顶，其余按更新时间倒序
+// 当前科目下、按标签与搜索词过滤后的可见笔记：收藏的置顶，其余按更新时间倒序
 function visibleNotes(subj) {
     let notes = state.notes.filter((n) => n.subjectId === subj.id);
+    if (state.tagFilter) {
+        notes = notes.filter((n) => (n.tags || []).includes(state.tagFilter));
+    }
     const q = state.searchQuery.trim().toLowerCase();
     if (q) {
         notes = notes.filter((n) =>
             (n.title || '').toLowerCase().includes(q) ||
-            (n.content || '').toLowerCase().includes(q));
+            (n.content || '').toLowerCase().includes(q) ||
+            (n.tags || []).some((t) => t.toLowerCase().includes(q)));
     }
     return notes.sort((a, b) =>
         ((b.starred ? 1 : 0) - (a.starred ? 1 : 0)) || (b.updatedAt - a.updatedAt));
@@ -379,6 +409,72 @@ function updateStarBtn() {
     btn.classList.toggle('on', !!n.starred);
 }
 
+// ============ 标签 ============
+function renderTagBar() {
+    const bar = $('#noteTagBar');
+    const n = state.notes.find((x) => x.id === state.currentNoteId);
+    if (!n) {
+        bar.innerHTML = '';
+        bar.classList.add('hidden');
+        return;
+    }
+    bar.classList.remove('hidden');
+    bar.innerHTML = '';
+    for (const t of (n.tags || [])) {
+        const chip = document.createElement('span');
+        chip.className = 'tag-chip';
+        const txt = document.createElement('span');
+        txt.textContent = t;
+        const x = document.createElement('button');
+        x.className = 'tag-x';
+        x.textContent = '×';
+        x.title = '删除标签';
+        x.addEventListener('click', () => removeTag(t));
+        chip.append(txt, x);
+        bar.appendChild(chip);
+    }
+    const add = document.createElement('button');
+    add.className = 'tag-add-btn';
+    add.textContent = '＋ 标签';
+    add.addEventListener('click', addTag);
+    bar.appendChild(add);
+}
+
+async function addTag() {
+    const n = state.notes.find((x) => x.id === state.currentNoteId);
+    if (!n) return;
+    const raw = await promptModal('添加标签', '标签名，如：期末复习');
+    if (raw === null) return;
+    const tag = raw.trim().slice(0, 20);
+    if (!tag) return;
+    if (!Array.isArray(n.tags)) n.tags = [];
+    if (n.tags.includes(tag)) return;
+    n.tags.push(tag);
+    await idbPut('notes', n);
+    renderTagBar();
+    renderNotes();
+}
+
+async function removeTag(tag) {
+    const n = state.notes.find((x) => x.id === state.currentNoteId);
+    if (!n || !Array.isArray(n.tags)) return;
+    n.tags = n.tags.filter((t) => t !== tag);
+    await idbPut('notes', n);
+    if (state.tagFilter === tag) state.tagFilter = null;
+    renderTagBar();
+    renderNotes();
+}
+
+function updateTagFilterChip() {
+    const chip = $('#tagFilterChip');
+    if (state.tagFilter) {
+        chip.textContent = `🏷 ${state.tagFilter} ×`;
+        chip.classList.remove('hidden');
+    } else {
+        chip.classList.add('hidden');
+    }
+}
+
 function renderEditor() {
     if (state.currentNoteId) {
         const n = state.notes.find((x) => x.id === state.currentNoteId);
@@ -388,6 +484,7 @@ function renderEditor() {
             lastPreviewMd = null;
             updatePreview();
             updateStarBtn();
+            renderTagBar();
             $('#noteListView').classList.add('hidden');
             $('#editorView').classList.remove('hidden');
             $('#editToggleBtn').classList.remove('hidden');
@@ -398,6 +495,7 @@ function renderEditor() {
     $('#noteListView').classList.remove('hidden');
     $('#editorView').classList.add('hidden');
     $('#editToggleBtn').classList.add('hidden');
+    $('#noteTagBar').classList.add('hidden');
     updateToolbarVisibility();
 }
 
@@ -534,6 +632,7 @@ function bindEvents() {
         state.selectedNoteIds.clear();
         state.searchQuery = '';
         $('#noteSearch').value = '';
+        state.tagFilter = null;
         $('#editToggleBtn').textContent = '编辑';
         $('#editorBody').classList.remove('mode-edit');
         $('#editorBody').classList.add('mode-preview');
@@ -563,6 +662,7 @@ function bindEvents() {
         state.editMode = false;
         state.searchQuery = '';
         $('#noteSearch').value = '';
+        state.tagFilter = null;
         $('#editToggleBtn').textContent = '编辑';
         $('#editorBody').classList.remove('mode-edit');
         $('#editorBody').classList.add('mode-preview');
@@ -579,6 +679,14 @@ function bindEvents() {
         const li = e.target.closest('.note-item');
         if (!li) return;
         const noteId = li.dataset.id;
+
+        // 列表项上的标签胶囊：只切换标签筛选，不打开笔记
+        const tagChip = e.target.closest('.note-tag');
+        if (tagChip && !state.selectionMode) {
+            state.tagFilter = tagChip.dataset.tag;
+            renderNotes();
+            return;
+        }
 
         // 列表项上的收藏星标：只切换收藏，不打开笔记
         const starBtn = e.target.closest('.note-star');
@@ -636,6 +744,11 @@ function bindEvents() {
             state.searchQuery = e.target.value.trim();
             renderNotes();
         }, 150);
+    });
+
+    $('#tagFilterChip').addEventListener('click', () => {
+        state.tagFilter = null;
+        renderNotes();
     });
 
     setupScrollSync();
@@ -1410,6 +1523,7 @@ async function doExport(selectedNoteIds) {
             createdAt: n.createdAt,
             updatedAt: n.updatedAt,
             starred: !!n.starred,
+            tags: Array.isArray(n.tags) ? n.tags : [],
         });
     }
 
@@ -1504,7 +1618,11 @@ async function importFromBackup(zipFiles, dec) {
         content = content.replace(/\.\.\/img\/([\w-]+)\.\w+/g, (m, id) =>
             assetPathMap.has(id) ? `nf:asset/${id}` : m
         );
-        notes.push({ ...n, content });
+        notes.push({
+            ...n,
+            content,
+            tags: Array.isArray(n.tags) ? n.tags : [],
+        });
     }
     if (missing > 0) {
         const go = confirm(`有 ${missing} 篇笔记在 zip 中找不到对应文件，继续导入其余笔记？`);

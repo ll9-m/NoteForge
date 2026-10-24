@@ -60,7 +60,8 @@
                     <button class="text-btn" id="selectAllBtn">全选</button>
                 </div>
                 <div class="note-search-row hidden" id="noteSearchRow">
-                    <input class="note-search" id="noteSearch" type="search" placeholder="搜索标题与正文…" autocomplete="off">
+                    <input class="note-search" id="noteSearch" type="search" placeholder="搜索标题、正文与标签…" autocomplete="off">
+                    <button class="tag-filter-chip hidden" id="tagFilterChip" title="清除标签筛选"></button>
                 </div>
                 <ul class="note-list" id="noteList"></ul>
                 <div class="empty" id="noteListEmpty"></div>
@@ -77,6 +78,7 @@
                     <button class="icon-btn" id="starNoteBtn" aria-label="收藏笔记" title="收藏/取消收藏">☆</button>
                     <button class="icon-btn" id="deleteNoteBtn" aria-label="删除笔记">🗑</button>
                 </div>
+                <div class="tag-bar hidden" id="noteTagBar"></div>
                 <div class="editor-body mode-preview" id="editorBody">
                     <textarea class="note-content" id="noteContent" placeholder="开始写 Markdown..."
                         spellcheck="false"></textarea>
